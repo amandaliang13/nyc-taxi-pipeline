@@ -1,0 +1,15 @@
+# Keep the build context tiny — the Dockerfile only needs pip + a constraints URL.
+.venv/
+data/
+logs/
+plugins/
+config/
+.git/
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dbt/**/target/
+dbt/**/dbt_packages/
+.DS_Store

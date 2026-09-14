@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Env / secrets
+.env
+
+# dbt
+dbt/nyc_taxi/target/
+dbt/nyc_taxi/dbt_packages/
+dbt/nyc_taxi/logs/
+
+# Airflow
+dags/__pycache__/
+logs/
+plugins/
+config/
+airflow.db
+
+# OS
+.DS_Store
