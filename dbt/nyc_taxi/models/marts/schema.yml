@@ -1,0 +1,5 @@
+# TODO: schema tests (not_null, unique, relationships) for
+# fact_trips and all dims, per architecture.md §4.
+version: 2
+
+models: []

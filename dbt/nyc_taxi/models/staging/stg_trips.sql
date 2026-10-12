@@ -1,0 +1,8 @@
+-- Type casting + is_valid_trip flagging, no aggregation (architecture.md §4).
+-- Applies the DQ thresholds from architecture.md §3:
+--   fare_amount < 0 -> invalid
+--   trip_distance = 0 AND fare_amount > minimum flag-drop fare -> invalid
+--   dropoff_datetime <= pickup_datetime -> invalid
+--   trip duration > 24h -> invalid
+--   location_id outside known valid range (per zone lookup) -> invalid
+-- TODO: implement against source('raw', 'trips').
