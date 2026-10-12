@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync*)",
+      "Bash(uv run pytest*)",
+      "Bash(uv run ruff check*)",
+      "Bash(uv run ruff format*)",
+      "Bash(uv run dbt run*)",
+      "Bash(uv run dbt test*)",
+      "Bash(uv run dbt seed*)",
+      "Bash(uv run dbt snapshot*)",
+      "Bash(docker compose build*)",
+      "Bash(docker compose up airflow-init*)",
+      "Bash(docker compose up -d*)",
+      "Bash(docker compose run --rm airflow-cli*)",
+      "Bash(docker compose --profile flower up*)",
+      "Bash(docker compose ps*)",
+      "Bash(docker compose logs*)"
+    ]
+  }
+}
