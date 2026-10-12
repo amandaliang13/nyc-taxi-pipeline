@@ -131,7 +131,7 @@ def taxi_monthly_ingest():
 
         - delete-by-source_month + COPY insert, single transaction (idempotent).
         - normalized-on-load: snake_case columns, nullable superset schema,
-          minimal coercion. No filtering / dedup / business logic (that's dbt).
+          minimal coercion.
         - manifest upsert drives backfill visibility and "which months need dbt".
 
         Returns {"source_month": ..., "row_count": ...}.
@@ -155,7 +155,7 @@ def taxi_monthly_ingest():
             source_month=month["source_month"],
             row_count=row_count,
             s3_key=s3_key,
-            conn_id=WAREHOUSE_CONN_ID,
+            engine=engine,
         )
         return {"source_month": month["source_month"], "row_count": row_count}
 
