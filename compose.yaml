@@ -79,6 +79,10 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - warehouse-db-data:/var/lib/postgresql
+      # Applied by the postgres entrypoint only when the data volume is empty.
+      # For an existing volume, run the files with psql (both are IF NOT EXISTS).
+      - ./sql/raw/trips.sql:/docker-entrypoint-initdb.d/01_raw_trips.sql:ro
+      - ./sql/control/manifest.sql:/docker-entrypoint-initdb.d/02_control_manifest.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nyc_taxi}"]
       interval: 10s

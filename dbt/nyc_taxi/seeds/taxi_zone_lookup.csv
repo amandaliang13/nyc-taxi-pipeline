@@ -1,0 +1,4 @@
+LocationID,Borough,Zone,service_zone
+# TODO : replace with real TLC Taxi Zone Lookup Table
+# (source: architecture.md §5 / tools.md external data source list).
+# Placeholder header only — do not load real seeds off this stub.

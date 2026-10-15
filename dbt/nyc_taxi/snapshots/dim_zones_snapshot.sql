@@ -1,0 +1,5 @@
+-- SCD Type 2 on the TLC zone lookup (architecture.md §3, §5).
+-- Implemented as a dbt snapshot, not a hand-rolled mart model, per the
+-- dbt-native mechanism for SCD2 (valid_from/valid_to/is_current).
+-- TODO: flesh out {% snapshot dim_zones_snapshot %} block,
+-- strategy + unique_key + updated_at (or check_cols) against seeds.taxi_zone_lookup.

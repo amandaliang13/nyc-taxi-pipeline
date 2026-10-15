@@ -1,0 +1,2 @@
+-- Standard date dimension: date, day-of-week, month, year, is_holiday
+-- (architecture.md §3). Standard practice, cheap to build.

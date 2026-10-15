@@ -19,5 +19,8 @@ plugins/
 config/
 airflow.db
 
+# Claude Code
+.claude/worktrees/
+
 # OS
 .DS_Store

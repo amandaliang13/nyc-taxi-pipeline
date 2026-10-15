@@ -1,0 +1,2 @@
+-- Static dimension, small lookup (architecture.md §3).
+-- TODO : build from stg_payment_types.

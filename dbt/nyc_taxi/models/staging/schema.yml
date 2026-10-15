@@ -1,0 +1,8 @@
+# Source defs + column-level tests (architecture.md §5).
+# TODO: define sources block for raw S3/external tables,
+# add not_null / unique / accepted_values / relationships tests.
+version: 2
+
+sources: []
+
+models: []

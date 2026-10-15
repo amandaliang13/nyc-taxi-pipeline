@@ -1,0 +1,5 @@
+# TODO: fill in per dbt-core scaffold (dbt init) + architecture.md §5.
+name: 'nyc_taxi'
+version: '1.0.0'
+config-version: 2
+profile: 'nyc_taxi'
