@@ -8,11 +8,9 @@ Never commit or push without explicit approval, even when the work feels done.
 
 ## Project status
 
-**Scaffolding stage.** The project layout and architecture decisions are final (see `architecture.md`), but most pipeline logic remains stubbed out or unimplemented:
-- `ingestion/manifest.py` — docstring only, `has_been_loaded`/`mark_loaded` not written
+**Ingestion built; transform not yet.** The project layout and architecture decisions are final (see `architecture.md`). The ingestion layer (`ingestion/`, DAG 1 tasks, `sql/` DDL) is implemented and covered by `tests/test_idempotency.py` (rerun, out-of-order backfill, rollback, schema drift — ingestion layer only; the dbt/`fact_trips` half comes with the marts). Still stubbed out or unimplemented:
 - `dags/taxi_transform_and_test_dag.py` — empty stub
 - `scripts/backfill.sh` — empty stub
-- `tests/test_idempotency.py` — empty stub
 - dbt models under `dbt/nyc_taxi/models/` (staging, marts, presentation) and `snapshots/dim_zones_snapshot.sql` exist as files but are not built out
 - The DAG-to-DAG trigger (DAG 1 → DAG 2) is not wired up yet. `architecture.md` specifies asset-based scheduling (`outlets=[Asset(...)]` / `schedule=[asset]`). `taxi_monthly_ingest_dag.py` only has a bare `loaded` reference and a `# TODO: Use asset-based DAGs to trigger dbt DAG` comment. No trigger mechanism exists yet.
 
@@ -28,9 +26,12 @@ uv run pytest                              # run all tests
 uv run pytest tests/test_idempotency.py    # run one test file
 uv run pytest tests/test_idempotency.py::test_name -v   # run a single test
 uv run pytest --cov                        # with coverage (pytest-cov installed)
+uv run pytest -rs                          # show skip reasons
 uv run ruff check .                        # lint
 uv run ruff format .                       # format
 ```
+
+`tests/test_idempotency.py` needs the warehouse Postgres up (`docker compose up -d warehouse-db`). It creates and drops a throwaway `nyc_taxi_test_*` database, so the real warehouse is never touched; S3 is mocked with `moto`. If Postgres isn't reachable the tests **skip**, not fail — check `-rs` before trusting a green run.
 
 Local stack (Airflow 3.x + two Postgres instances + Redis, via `compose.yaml`):
 
@@ -44,7 +45,7 @@ docker compose --profile flower up         # optional Celery monitoring UI (port
 
 Airflow UI: `localhost:8080`.
 
-`compose.yaml` publishes warehouse Postgres to the host at `localhost:5432` (`${POSTGRES_PORT:-5432}`), so host-native dbt can connect to it directly. The Airflow metadata DB lives in a separate, unpublished Postgres instance, as its own database (`airflow-metadata-db`). Never treat it as a schema under the warehouse.
+`compose.yaml` publishes warehouse Postgres to the host at `localhost:5432` (`${POSTGRES_PORT:-5432}`), so host-native dbt can connect to it directly. `.env` holds the host-side `POSTGRES_HOST=localhost` / `POSTGRES_PORT`; `compose.yaml` overrides them to `warehouse-db` / `5432` inside the Airflow containers, so the same variable names work on both sides. The Airflow metadata DB lives in a separate, unpublished Postgres instance, as its own database (`airflow-metadata-db`). Never treat it as a schema under the warehouse.
 
 dbt (run from `dbt/nyc_taxi/`, against the host-published warehouse Postgres):
 

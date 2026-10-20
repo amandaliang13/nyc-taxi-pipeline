@@ -86,7 +86,9 @@ Schema routing is dbt *config*, not per-model SQL: `dbt_project.yml` sets a defa
 
 `raw` is not a dbt layer at all — it's the landing zone Python writes to and dbt reads as a source.
  
-Airflow's own metadata DB (the `airflow` database) lives in the **same local Postgres instance** as the taxi warehouse. But it is a **separate database** — not a schema under `raw`/`staging`/`marts`.
+Alongside `raw`, the Python-owned `control` schema holds `control.manifest`, the idempotency/audit log of loaded `(taxi_type, source_month)` partitions. Like `raw`, it's not a dbt layer.
+
+Airflow's own metadata DB lives in a **separate Postgres instance** (`airflow-metadata-db` in `compose.yaml`, not published to the host) — not a schema under `raw`/`staging`/`marts`, and not in the warehouse instance.
 ### Local container build (as built, 2026-09-03)
  
 Custom Airflow image rather than stock `apache/airflow:3.3.1` — built from the slim base with only the extras this project actually uses, which roughly halves the image.
@@ -136,7 +138,7 @@ Rationale for splitting rather than one monolithic DAG:
  
 ## 5. Project layout
 
-Status: as built, 2026-09-11. This doc is kept in sync with the repo rather than the original plan — see the deltas noted below.
+Status: as built, 2026-10-19. This doc is kept in sync with the repo rather than the original plan — see the deltas noted below.
 
 ```
 nyc-taxi-pipeline/
@@ -145,7 +147,7 @@ nyc-taxi-pipeline/
 ├── compose.yaml                         # Airflow + Postgres, single command bring-up
 ├── Dockerfile                           # custom Airflow image, see §4
 ├── .dockerignore
-├── .env                                 # not committed; no .env.example checked in yet
+├── .env                                 # not committed; see .env.example
 │
 ├── dags/
 │   ├── taxi_monthly_ingest_dag.py       # DAG 1: orchestrates raw ingest, one run per TLC month
@@ -156,7 +158,11 @@ nyc-taxi-pipeline/
 │   ├── tlc.py                           # addressing: TLC source URLs, S3 key naming, availability check
 │   ├── extract.py                       # pulls TLC monthly Parquet, streams straight to S3 raw/ unmodified
 │   ├── load_raw.py                      # S3 Parquet → Postgres `raw` schema (bulk load / COPY)
-│   └── manifest.py                      # tracks loaded months for idempotency checks — stub
+│   └── manifest.py                      # tracks loaded months in control.manifest (upsert)
+│
+├── sql/                                 # warehouse DDL, mounted into warehouse-db's initdb
+│   ├── raw/trips.sql                    # raw.trips landing table
+│   └── control/manifest.sql             # control.manifest idempotency/audit table
 │
 ├── dbt/
 │   └── nyc_taxi/
@@ -185,7 +191,8 @@ nyc-taxi-pipeline/
 │       └── macros/
 │
 ├── tests/
-│   └── test_idempotency.py              # pytest: rerun + out-of-order backfill don't corrupt state — stub
+│   ├── conftest.py                      # throwaway test DB, moto S3, synthetic TLC Parquet
+│   └── test_idempotency.py              # pytest: rerun + out-of-order backfill don't corrupt state (ingestion layer)
 │
 └── scripts/
     └── backfill.sh                      # manual backfill trigger for N months — stub
