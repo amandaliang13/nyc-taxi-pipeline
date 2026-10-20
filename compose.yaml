@@ -28,6 +28,10 @@ x-airflow-common: &airflow-common
     AIRFLOW_CONN_AWS_DEFAULT: 'aws://:${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@/?region_name=${AWS_REGION}'
     AIRFLOW_CONN_WAREHOUSE_POSTGRES: 'postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@warehouse-db:5432/${POSTGRES_DB:-nyc_taxi}'
     AIRFLOW_VAR_S3_BUCKET: ${S3_BUCKET_VAR}
+    # .env holds the host-side values (localhost, published port); inside the
+    # Docker network the warehouse is warehouse-db:5432. Overrides env_file.
+    POSTGRES_HOST: warehouse-db
+    POSTGRES_PORT: '5432'
     PYTHONPATH: /opt/airflow/project
   volumes:
     - ./dags:/opt/airflow/dags

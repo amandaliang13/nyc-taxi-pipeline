@@ -11,7 +11,14 @@ ingestion/ (Python) = Extract + Load, "dumb" movement. Pull TLC Parquet, land it
 dbt/ (SQL) = Transform + Test, "smart" logic. All actual cleaning — type casting, is_valid_trip flagging, the DQ thresholds — belongs in stg_trips.sql, not Python.
 
 ## Status
-Scaffolding stage — project layout in place, pipeline logic not yet implemented.
+Ingestion layer built (TLC → S3 → Postgres `raw`, with a `control.manifest` audit table) and covered by idempotency tests. dbt transforms, DAG 2 and backfill script not yet implemented.
 
 ## Setup
-TODO: fill in once docker-compose.yml and dbt profile are wired up.
+TODO: fill in once compose.yaml and the dbt profile are fully wired up.
+
+## Tests
+```bash
+docker compose up -d warehouse-db
+uv run pytest -v -rs
+```
+`tests/test_idempotency.py` checks rerun safety, out-of-order backfills, mid-load rollback and the `cbd_congestion_fee` schema drift against a throwaway Postgres database and mocked S3. Without a reachable Postgres the tests skip rather than fail.

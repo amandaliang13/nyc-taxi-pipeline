@@ -40,9 +40,6 @@ DBT_DAG_ID = "taxi_transform_and_test"
 AWS_CONN_ID = "AWS_DEFAULT"  # AIRFLOW_CONN_AWS_DEFAULT in compose.yaml
 WAREHOUSE_CONN_ID = "WAREHOUSE_POSTGRES"  # AIRFLOW_CONN_WAREHOUSE_POSTGRES in compose.yaml
 
-RAW_SCHEMA = "raw"
-RAW_TABLE = "trips"
-
 # yyyyMM, month 01-12
 MONTH_PARAM_PATTERN = r"^\d{4}(0[1-9]|1[0-2])$"
 
@@ -148,8 +145,6 @@ def taxi_monthly_ingest():
             engine=engine,
             bucket=Variable.get("S3_BUCKET"),
             s3_client=S3Hook(aws_conn_id=AWS_CONN_ID).get_conn(),
-            schema=RAW_SCHEMA,
-            table=RAW_TABLE,
         )
         mark_loaded(
             source_month=month["source_month"],
