@@ -48,7 +48,7 @@ _MONEY_COLUMNS = {
 
 def _pg_url(database: str) -> URL:
     return URL.create(
-        "postgresql+psycopg2",
+        "postgresql+psycopg",
         username=os.environ.get("POSTGRES_USER", "postgres"),
         password=os.environ.get("POSTGRES_PASSWORD", "changeme"),
         host=os.environ.get("POSTGRES_HOST", "localhost"),
