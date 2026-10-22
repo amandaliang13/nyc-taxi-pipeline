@@ -3,7 +3,10 @@ DAG 1 - taxi_monthly_ingest
 
 Raw ingest of one TLC yellow-taxi month per run:
 
-    resolve_month -> check_source_available -> extract_to_s3 -> load_raw_postgres -> trigger_dbt
+    resolve_month -> check_source_available -> extract_to_s3 -> load_raw_postgres
+
+load_raw_postgres declares the `raw_trips_loaded` Asset as an outlet; on
+success it emits an asset event that schedules taxi_transform_and_test.
 
 Design notes:
 
@@ -27,15 +30,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from ingestion.tlc import tlc_source_url
 import pendulum
 from airflow.sdk import Param, Variable, dag, task
+from assets import RAW_TRIPS_LOADED
+
+from ingestion.tlc import tlc_source_url
 
 # --- config ---------------------------------------------------------------------
 TAXI_TYPE = "yellow"
 MONTH_OFFSET = 6  # scheduled runs target (data_interval_start - 6 months)
-
-DBT_DAG_ID = "taxi_transform_and_test"
 
 AWS_CONN_ID = "AWS_DEFAULT"  # AIRFLOW_CONN_AWS_DEFAULT in compose.yaml
 WAREHOUSE_CONN_ID = "WAREHOUSE_POSTGRES"  # AIRFLOW_CONN_WAREHOUSE_POSTGRES in compose.yaml
@@ -122,7 +125,7 @@ def taxi_monthly_ingest():
         return s3_key
 
 
-    @task
+    @task(outlets=[RAW_TRIPS_LOADED])
     def load_raw_postgres(month: dict[str, str], s3_key: str) -> dict[str, object]:
         """Load one month into raw.trips, then record it in the manifest.
 
@@ -130,6 +133,7 @@ def taxi_monthly_ingest():
         - normalized-on-load: snake_case columns, nullable superset schema,
           minimal coercion.
         - manifest upsert drives backfill visibility and "which months need dbt".
+        - on success, emits a RAW_TRIPS_LOADED asset event (schedules DAG 2).
 
         Returns {"source_month": ..., "row_count": ...}.
         """
@@ -157,10 +161,9 @@ def taxi_monthly_ingest():
     month = resolve_month()
     source_ready = check_source_available(month)
     s3_key = extract_to_s3(month)
-    loaded = load_raw_postgres(month, s3_key)
+    load_raw_postgres(month, s3_key)
 
     source_ready >> s3_key
-    loaded  # TODO: Use asset-based DAGs to trigger dbt DAG
 
 
 taxi_monthly_ingest()

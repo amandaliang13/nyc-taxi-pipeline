@@ -128,7 +128,7 @@ Two DAGs, not one:
 Rationale for splitting rather than one monolithic DAG:
 **(1)Blast radius** a failing dbt test shouldn't force re-downloading from TLC and rewriting S3. **(2)Cadence mismatch** ingest runs monthly.
 
-**Trigger mechanism: Asset-based scheduling.** DAG 1's S3-raw-write task declares `outlets=[Asset("raw_trips_loaded")]`. DAG 2 sets `schedule=[asset]` instead of a cron string or a `TriggerDagRunOperator` call. This was chosen over `TriggerDagRunOperator` because the asset gives an explicit, UI-visible data-lineage edge between the two DAGs, rather than an imperative "and then trigger this" call.
+**Trigger mechanism: Asset-based scheduling.** DAG 1's `load_raw_postgres` task (the one that makes data available to dbt) declares `outlets=[RAW_TRIPS_LOADED]`, i.e. `Asset("raw_trips_loaded")`, defined once in `dags/assets.py`. The event is emitted only when the task succeeds. DAG 2 sets `schedule=[asset]` instead of a cron string or a `TriggerDagRunOperator` call. This was chosen over `TriggerDagRunOperator` because the asset gives an explicit, UI-visible data-lineage edge between the two DAGs, rather than an imperative "and then trigger this" call.
 
 **Ingest granularity: one month per DAG run**, matching TLC's own publish cadence. This keeps the backfill story clean — rerunning N months is a natural, explainable operation, not an artificial batching decision.
  
@@ -138,7 +138,7 @@ Rationale for splitting rather than one monolithic DAG:
  
 ## 5. Project layout
 
-Status: as built, 2026-10-19. This doc is kept in sync with the repo rather than the original plan — see the deltas noted below.
+Status: as built, 2026-10-21. This doc is kept in sync with the repo rather than the original plan — see the deltas noted below.
 
 ```
 nyc-taxi-pipeline/
@@ -150,6 +150,7 @@ nyc-taxi-pipeline/
 ├── .env                                 # not committed; see .env.example
 │
 ├── dags/
+│   ├── assets.py                        # shared Asset definitions (RAW_TRIPS_LOADED: DAG 1 → DAG 2)
 │   ├── taxi_monthly_ingest_dag.py       # DAG 1: orchestrates raw ingest, one run per TLC month
 │   └── taxi_transform_and_test_dag.py   # DAG 2: dbt run + dbt test — stub, not yet implemented
 │
@@ -195,7 +196,7 @@ nyc-taxi-pipeline/
 │   └── test_idempotency.py              # pytest: rerun + out-of-order backfill don't corrupt state (ingestion layer)
 │
 └── scripts/
-    └── backfill.sh                      # manual backfill trigger for N months — stub
+    └── backfill.sh                      # backfill.sh START END (YYYY-MM): one DAG 1 trigger per month
 ```
 
 Notes on this layout:
