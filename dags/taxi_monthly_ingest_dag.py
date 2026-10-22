@@ -100,17 +100,21 @@ def taxi_monthly_ingest():
         without a noisy failure.
         """
         import logging
+
         from ingestion.tlc import tlc_file_available
 
         is_available = tlc_file_available(month["year"], month["month"], taxi_type=TAXI_TYPE)
         if not is_available:
             raise RuntimeError("TLC file not available yet")
-        logging.info("TLC file is available: %s", 
-                     tlc_source_url(month["year"], month["month"], taxi_type=TAXI_TYPE))
+        logging.getLogger(__name__).info(
+            "TLC file is available: %s",
+            tlc_source_url(month["year"], month["month"], taxi_type=TAXI_TYPE),
+        )
 
     @task
     def extract_to_s3(month: dict[str, str]) -> str:
         from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
         from ingestion.extract import stream_tlc_to_s3
 
         bucket = Variable.get("S3_BUCKET")
@@ -139,6 +143,7 @@ def taxi_monthly_ingest():
         """
         from airflow.providers.amazon.aws.hooks.s3 import S3Hook
         from airflow.providers.postgres.hooks.postgres import PostgresHook
+
         from ingestion.load_raw import load_month
         from ingestion.manifest import mark_loaded
 
