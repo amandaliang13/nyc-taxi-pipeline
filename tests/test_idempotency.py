@@ -4,7 +4,7 @@ Validates pipeline *behavior*, Ingestion layer only:
   - out-of-order backfills (month N+2 before month N) do not corrupt state
 """
 
-import psycopg2.errors
+import psycopg.errors
 import pyarrow as pa
 import pytest
 from sqlalchemy import text
@@ -151,7 +151,7 @@ def test_unexpected_new_column_fails_loudly(engine, put_month, ingest):
     manifest_before = _manifest(engine)
 
     put_month("2024-03", rows=3, extra_columns={"new_tlc_fee": [1.0, 1.0, 1.0]})
-    with pytest.raises(psycopg2.errors.UndefinedColumn):
+    with pytest.raises(psycopg.errors.UndefinedColumn):
         ingest("2024-03")
 
     assert _row_ids(engine, "2024-03") == ids_before

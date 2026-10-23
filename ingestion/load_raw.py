@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
-from psycopg2 import sql
+from psycopg import sql
 
 _COLUMN_RENAMES = {
     "VendorID": "vendor_id",
@@ -67,7 +67,7 @@ def load_month(
     Args:
         s3_key: key of the raw Parquet object (e.g. from ``extract.stream_tlc_to_s3``).
         source_month: partition tag, ``"YYYY-MM"``.
-        engine: engine for the warehouse.
+        engine: SQLAlchemy engine for the warehouse, on the psycopg (3) driver.
         bucket: S3 bucket holding ``s3_key``.
         schema, table: destination raw table.
         s3_client: optional boto3 S3 client (defaults to ``boto3.client("s3")``).
@@ -92,8 +92,8 @@ def load_month(
                 )
                 buf = io.BytesIO()
                 pacsv.write_csv(batch_table, buf, pacsv.WriteOptions(include_header=False))
-                buf.seek(0)
-                cur.copy_expert(copy_stmt.as_string(cur), buf)
+                with cur.copy(copy_stmt) as copy:
+                    copy.write(buf.getbuffer())
                 row_count += batch_table.num_rows
         raw_conn.commit()
     except Exception:

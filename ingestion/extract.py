@@ -46,7 +46,6 @@ def stream_tlc_to_local(
     with requests.get(url, stream=True, timeout=60) as resp:
         resp.raise_for_status()
         with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                f.write(chunk)
+            f.writelines(resp.iter_content(chunk_size=1024 * 1024))
 
     return dest_path

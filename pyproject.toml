@@ -9,7 +9,7 @@ dependencies = [
     "dbt-core>=1.12.3",
     "dbt-postgres>=1.11.0",
     "pandas>=3.0.5",
-    "psycopg2-binary>=2.9.12",
+    "psycopg[binary]>=3.2",
     "pyarrow>=25.0.1",
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
@@ -28,3 +28,9 @@ dev = [
 # ingestion/ isn't an installed package; put the repo root on sys.path.
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+extend-select = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"psycopg2".msg = "Use psycopg (3). psycopg2 is only dbt-postgres's internal driver."

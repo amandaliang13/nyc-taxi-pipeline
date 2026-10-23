@@ -3,7 +3,10 @@ DAG 1 - taxi_monthly_ingest
 
 Raw ingest of one TLC yellow-taxi month per run:
 
-    resolve_month -> check_source_available -> extract_to_s3 -> load_raw_postgres -> trigger_dbt
+    resolve_month -> check_source_available -> extract_to_s3 -> load_raw_postgres
+
+load_raw_postgres declares the `raw_trips_loaded` Asset as an outlet; on
+success it emits an asset event that schedules taxi_transform_and_test.
 
 Design notes:
 
@@ -27,15 +30,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from ingestion.tlc import tlc_source_url
 import pendulum
 from airflow.sdk import Param, Variable, dag, task
+from assets import RAW_TRIPS_LOADED
+
+from ingestion.tlc import tlc_source_url
 
 # --- config ---------------------------------------------------------------------
 TAXI_TYPE = "yellow"
 MONTH_OFFSET = 6  # scheduled runs target (data_interval_start - 6 months)
-
-DBT_DAG_ID = "taxi_transform_and_test"
 
 AWS_CONN_ID = "AWS_DEFAULT"  # AIRFLOW_CONN_AWS_DEFAULT in compose.yaml
 WAREHOUSE_CONN_ID = "WAREHOUSE_POSTGRES"  # AIRFLOW_CONN_WAREHOUSE_POSTGRES in compose.yaml
@@ -97,17 +100,21 @@ def taxi_monthly_ingest():
         without a noisy failure.
         """
         import logging
+
         from ingestion.tlc import tlc_file_available
 
         is_available = tlc_file_available(month["year"], month["month"], taxi_type=TAXI_TYPE)
         if not is_available:
             raise RuntimeError("TLC file not available yet")
-        logging.info("TLC file is available: %s", 
-                     tlc_source_url(month["year"], month["month"], taxi_type=TAXI_TYPE))
+        logging.getLogger(__name__).info(
+            "TLC file is available: %s",
+            tlc_source_url(month["year"], month["month"], taxi_type=TAXI_TYPE),
+        )
 
     @task
     def extract_to_s3(month: dict[str, str]) -> str:
         from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
         from ingestion.extract import stream_tlc_to_s3
 
         bucket = Variable.get("S3_BUCKET")
@@ -122,7 +129,7 @@ def taxi_monthly_ingest():
         return s3_key
 
 
-    @task
+    @task(outlets=[RAW_TRIPS_LOADED])
     def load_raw_postgres(month: dict[str, str], s3_key: str) -> dict[str, object]:
         """Load one month into raw.trips, then record it in the manifest.
 
@@ -130,11 +137,13 @@ def taxi_monthly_ingest():
         - normalized-on-load: snake_case columns, nullable superset schema,
           minimal coercion.
         - manifest upsert drives backfill visibility and "which months need dbt".
+        - on success, emits a RAW_TRIPS_LOADED asset event (schedules DAG 2).
 
         Returns {"source_month": ..., "row_count": ...}.
         """
         from airflow.providers.amazon.aws.hooks.s3 import S3Hook
         from airflow.providers.postgres.hooks.postgres import PostgresHook
+
         from ingestion.load_raw import load_month
         from ingestion.manifest import mark_loaded
 
@@ -157,10 +166,9 @@ def taxi_monthly_ingest():
     month = resolve_month()
     source_ready = check_source_available(month)
     s3_key = extract_to_s3(month)
-    loaded = load_raw_postgres(month, s3_key)
+    load_raw_postgres(month, s3_key)
 
     source_ready >> s3_key
-    loaded  # TODO: Use asset-based DAGs to trigger dbt DAG
 
 
 taxi_monthly_ingest()
