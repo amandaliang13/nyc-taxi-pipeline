@@ -1,2 +1,2 @@
--- Static dimension, trivial but included for completeness (architecture.md §3).
+-- Static dimension, trivial but included for completeness.
 -- TODO : build from stg_vendors.

@@ -45,7 +45,7 @@ It differs from the standard "taxi pipeline" portfolio project in four ways:
 
 **Data quality thresholds (to be finalized in staging, documented here once set):**
 - fare_amount < 0 → invalid
-- trip_distance = 0 AND fare_amount > minimum flag-drop fare → invalid
+- trip_distance = 0 AND fare_amount > minimum flag-drop fare → invalid (dbt var `min_flag_drop_fare`, default 3.00)
 - dropoff_datetime <= pickup_datetime → invalid
 - trip duration > 24h → invalid
 - Note: coordinate-based bounding-box checks are N/A for this scope — 2023–2025 TLC data uses `location_id` (zone-based), not lat/long. Any invalid-location rule should instead check `location_id` against the known valid range in the zone lookup table.
@@ -79,7 +79,7 @@ Strict separation: Python moves data, dbt transforms it. dbt never moves data be
 | `staging` → `marts` | dbt models | Build star schema (fact + dimensions) | Cleaning — already done upstream |
 | Tests | dbt tests | Assert correctness at each layer | — |
  
-Schema routing is dbt *config*, not per-model SQL: `dbt_project.yml` sets a default schema per model folder, appended to the base schema in `profiles.yml`.
+Schema routing is dbt *config*, not per-model SQL: `dbt_project.yml` sets a schema per folder (`staging`, `marts`; presentation models also land in `marts`; seeds in `seeds`, snapshots in `snapshots`). `macros/generate_schema_name.sql` uses it verbatim instead of dbt's default `public_staging`.
 ### Postgres schema layers
  
 `raw` → `staging` → `marts`
@@ -110,7 +110,7 @@ Files:
 - Both Postgres services (Airflow metadata DB, taxi warehouse) on `postgres:18`.
 Two version notes worth tracking rather than assuming:
  
-- **Python 3.14 in-container vs 3.12 in the host `uv` venv.** dbt and ad-hoc ingestion runs happen on the host at 3.12. The same `ingestion/` code runs at 3.14 inside the worker when called from a DAG. It needs to work on both. Either align the host venv to 3.14, or treat the split as deliberate and keep `requires-python` wide enough to cover it.
+- **Host and container both on Python 3.14 (decided 2026-10-30).** `.python-version` pins the host `uv` venv (pytest, dbt, ad-hoc ingestion) to 3.14, matching the worker image, so a host test run exercises the same interpreter the DAGs use. `requires-python = ">=3.12"` stays as a looser floor.
 - **Python 3.14 and wheel availability.** Python 3.14 is recent enough that wheel availability for providers and libraries should be verified, not assumed. The constraints file pinned a working set here, so the build is fine today. But a later `uv add` of something unrelated could still hit a package with no 3.14 wheel.
 ### S3 key convention
  
@@ -168,14 +168,19 @@ nyc-taxi-pipeline/
 ├── dbt/
 │   └── nyc_taxi/
 │       ├── dbt_project.yml
+│       ├── packages.yml                 # dbt_utils
 │       ├── profiles.yml.example
 │       ├── seeds/
-│       │   └── taxi_zone_lookup.csv     # TLC zone lookup, source for dim_zones snapshot
+│       │   ├── taxi_zone_lookup.csv     # TLC zone lookup, source for dim_zones snapshot
+│       │   ├── payment_types.csv
+│       │   ├── vendors.csv
+│       │   └── us_holidays.csv          # 2023–2025 federal holidays, for dim_date.is_holiday
 │       ├── snapshots/
 │       │   └── dim_zones_snapshot.sql   # SCD2 via dbt snapshot (not a hand-rolled mart model) — stub
 │       ├── models/
 │       │   ├── staging/
-│       │   │   ├── stg_trips.sql        # stub
+│       │   │   ├── stg_trips.sql        # rename, type, per-rule DQ flags + is_valid_trip
+│       │   │   ├── stg_zones.sql
 │       │   │   ├── stg_payment_types.sql
 │       │   │   ├── stg_vendors.sql
 │       │   │   └── schema.yml           # source defs + column-level tests
@@ -190,6 +195,7 @@ nyc-taxi-pipeline/
 │       ├── tests/
 │       │   └── singular/                # custom DQ rules: negative fares, bad timestamps, etc.
 │       └── macros/
+│           └── generate_schema_name.sql # use +schema verbatim (staging, not public_staging)
 │
 ├── tests/
 │   ├── conftest.py                      # throwaway test DB, moto S3, synthetic TLC Parquet
