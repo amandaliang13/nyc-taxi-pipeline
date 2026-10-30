@@ -1,5 +1,40 @@
-# TODO: fill in per dbt-core scaffold (dbt init) + architecture.md §5.
 name: 'nyc_taxi'
 version: '1.0.0'
 config-version: 2
 profile: 'nyc_taxi'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # DQ rule: a zero-distance trip charging more than the initial meter fare is invalid.
+  # NYC yellow-taxi initial charge = $3.00.
+  min_flag_drop_fare: 3.00
+
+# Schemas are used verbatim (macros/generate_schema_name.sql), not appended to
+# the profile's base schema.
+models:
+  nyc_taxi:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+    presentation:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  nyc_taxi:
+    +schema: seeds
+    +quote_columns: false  # TLC's "LocationID" header lands as locationid
+
+snapshots:
+  nyc_taxi:
+    +schema: snapshots

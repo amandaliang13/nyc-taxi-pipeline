@@ -1,4 +1,4 @@
--- Incremental, insert-only by pickup month (architecture.md §4).
+-- Incremental, insert-only by pickup month.
 -- Deliberately NOT merge/upsert: TLC does not correct published files in
 -- place after release, so upsert complexity is unnecessary (documented
 -- decision, not an oversight -- be ready to explain why merge was

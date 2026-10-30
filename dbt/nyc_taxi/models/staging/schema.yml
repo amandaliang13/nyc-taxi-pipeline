@@ -1,8 +1,29 @@
-# Source defs + column-level tests (architecture.md §5).
-# TODO: define sources block for raw S3/external tables,
-# add not_null / unique / accepted_values / relationships tests.
+# Source defs + model docs. Column tests come in Phase 6.
 version: 2
 
-sources: []
+sources:
+  - name: raw
+    description: Python-owned landing zone (ingestion/load_raw.py). dbt reads it, never writes it.
+    schema: raw
+    tables:
+      - name: trips
+        description: TLC yellow-taxi trips, landed unmodified; one load per source_month.
 
-models: []
+models:
+  - name: stg_trips
+    description: >
+      One row per raw trip: renamed, typed, and flagged. Rows are never dropped;
+      marts filter on is_valid_trip.
+    columns:
+      - name: is_negative_fare
+        description: fare_amount < 0.
+      - name: is_zero_distance_charged
+        description: trip_distance = 0 and fare_amount > var('min_flag_drop_fare').
+      - name: is_nonpositive_duration
+        description: dropoff_datetime <= pickup_datetime.
+      - name: is_over_24h
+        description: trip_duration > 24 hours.
+      - name: is_unknown_location
+        description: pickup or dropoff location_id missing from the zone lookup.
+      - name: is_valid_trip
+        description: True when no DQ flag is set. cbd_congestion_fee NULLs (pre-2025-01 schema drift) never count.

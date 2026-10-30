@@ -1,4 +1,3 @@
--- Presentation-layer aggregate mart, answers a real stakeholder question
--- (architecture.md §4). Which specific question -> pick before Week 8,
--- not during (see architecture.md §7 open questions).
+-- Presentation-layer aggregate mart, answers a real stakeholder question.
+-- Which specific question -> pick before Week 8, not during (open question).
 -- TODO : build against fact_trips + dim_zones snapshot + dim_date.
