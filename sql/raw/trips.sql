@@ -3,7 +3,7 @@
 -- id is a technical PK only -- idempotency comes from load_month()'s DELETE+COPY per
 -- source_month, not a uniqueness constraint on the data columns.
 -- Schema drift: cbd_congestion_fee is absent from the source entirely before source_month
--- 2025-01, not just null-valued.
+-- 2025-01, not just null-valued. Same for request_source before source_month 2026-06.
 
 CREATE SCHEMA IF NOT EXISTS raw;
 
@@ -29,8 +29,12 @@ CREATE TABLE IF NOT EXISTS raw.trips (
     congestion_surcharge    numeric(10, 2),
     airport_fee             numeric(10, 2),
     cbd_congestion_fee      numeric(10, 2),
+    request_source          text,
     source_month            text NOT NULL
 );
+
+-- CREATE TABLE IF NOT EXISTS won't touch a warehouse built before request_source existed.
+ALTER TABLE raw.trips ADD COLUMN IF NOT EXISTS request_source text;
 
 -- Backs both load_raw.py's DELETE-by-partition and dbt's source_month filters.
 CREATE INDEX IF NOT EXISTS idx_trips_source_month ON raw.trips (source_month);
@@ -46,5 +50,7 @@ COMMENT ON COLUMN raw.trips.payment_type IS
     'Payment code: 0=Flex Fare, 1=Credit card, 2=Cash, 3=No charge, 4=Dispute, 5=Unknown, 6=Voided.';
 COMMENT ON COLUMN raw.trips.cbd_congestion_fee IS
     'MTA Congestion Relief Zone charge, effective 2025-01-05. NULL before source_month 2025-01 by schema absence, not a data quality issue.';
+COMMENT ON COLUMN raw.trips.request_source IS
+    'Trip request channel code (e.g. HV0003, HV0005, A, CC), added by TLC from 2026-06. NULL before source_month 2026-06 by schema absence, not a data quality issue.';
 COMMENT ON COLUMN raw.trips.source_month IS
     'Ingestion partition tag "YYYY-MM", appended by load_raw.py. Basis for idempotent reload and downstream incremental filtering.';
