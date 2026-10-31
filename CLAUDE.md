@@ -104,7 +104,7 @@ Out-of-order backfills (loading month N+2 before N) must not corrupt state — t
 
 **Bad data is flagged, not deleted.** DQ rules (negative fare, zero distance with fare above `var('min_flag_drop_fare')`, dropoff ≤ pickup, duration > 24h, location_id not in the zone lookup) each get a boolean flag in `stg_trips`, and `is_valid_trip` = none fired. Downstream marts filter on the flag instead of dropping the row at ingest, so exclusions stay auditable.
 
-**Known schema drift to preserve, not paper over:** `cbd_congestion_fee` is absent (not merely null) from TLC's schema before `source_month 2025-01` (NYC congestion pricing, effective 2025-01-05). `raw.trips` already models this as a nullable column. Staging and marts logic should treat the absence as a documented drift event, not a data quality defect.
+**Known schema drift to preserve, not paper over:** `cbd_congestion_fee` is absent (not merely null) from TLC's schema before `source_month 2025-01` (NYC congestion pricing, effective 2025-01-05). `raw.trips` already models this as a nullable column. Likewise `request_source` (text) is absent before `source_month 2026-06`. Staging and marts logic should treat the absence as a documented drift event, not a data quality defect.
 
 **`ingestion/tlc.py` owns TLC URL and S3 key addressing.** Both `extract.py` and `load_raw.py` depend on it. It's the seam that keeps ingestion testable without Airflow.
 

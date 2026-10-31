@@ -127,6 +127,27 @@ def test_cbd_congestion_fee_absent_before_2025_loads_as_null(engine, put_month, 
     assert [float(fee) for fee in fees["2025-01"]] == [0.75, 0.75]
 
 
+def test_request_source_absent_before_2026_06_loads_as_null(engine, put_month, ingest):
+    assert "request_source" not in make_tlc_table("2026-05").column_names
+    put_month("2026-05", rows=3)
+    put_month("2026-06", rows=2)
+
+    ingest("2026-05")
+    ingest("2026-06")
+
+    with engine.connect() as conn:
+        sources = dict(
+            conn.execute(
+                text(
+                    "SELECT source_month, array_agg(request_source) "
+                    "FROM raw.trips GROUP BY source_month"
+                )
+            ).all()
+        )
+    assert sources["2026-05"] == [None, None, None]
+    assert sources["2026-06"] == ["HV0003", "HV0003"]
+
+
 def test_failure_mid_copy_rolls_back_delete(engine, put_month, ingest, monkeypatch):
     put_month("2023-06", rows=3)
     ingest("2023-06")

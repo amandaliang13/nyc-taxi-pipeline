@@ -125,6 +125,7 @@ def make_tlc_table(
       - 2023: passenger_count / RatecodeID are double, location/vendor ids int64
       - 2024+: passenger_count / RatecodeID int64, location/vendor ids int32
       - 2025-01+: cbd_congestion_fee present (absent before -- schema drift)
+      - 2026-06+: request_source present (absent before -- schema drift)
 
     Args:
         source_month: ``"YYYY-MM"``; picks the era's schema and the pickup dates.
@@ -161,6 +162,8 @@ def make_tlc_table(
     )
     if source_month >= "2025-01":
         columns["cbd_congestion_fee"] = (pa.float64(), [0.75] * rows)
+    if source_month >= "2026-06":
+        columns["request_source"] = (pa.large_string(), ["HV0003"] * rows)
 
     for name, values in (overrides or {}).items():
         columns[name] = (columns[name][0], values)
