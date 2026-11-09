@@ -217,3 +217,33 @@ def test_has_been_loaded_tracks_manifest(engine, put_month, ingest):
     assert has_been_loaded("2024-03", engine=engine)
     assert not has_been_loaded("2024-04", engine=engine)
     assert not has_been_loaded("2024-03", engine=engine, taxi_type="green")
+
+
+def _row_numbers(engine, source_month: str) -> list[tuple]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT source_row_number, tpep_pickup_datetime FROM raw.trips "
+                "WHERE source_month = :m ORDER BY source_row_number"
+            ),
+            {"m": source_month},
+        )
+        return [tuple(row) for row in rows]
+
+
+def test_source_row_number_is_stable_file_position(
+    engine, put_month, ingest, monkeypatch
+):
+    # Batches of 2 over 5 rows: numbering must continue across batch boundaries.
+    monkeypatch.setattr(load_raw, "_BATCH_ROWS", 2)
+    put_month("2024-03", rows=5)
+    ingest("2024-03")
+    first = _row_numbers(engine, "2024-03")
+
+    ingest("2024-03")
+
+    assert [n for n, _ in first] == [1, 2, 3, 4, 5]
+    # The synthetic file is in pickup order, so position tracks pickup time.
+    assert [p for _, p in first] == sorted(p for _, p in first)
+    # A reload of the same file regenerates id but not source_row_number.
+    assert _row_numbers(engine, "2024-03") == first

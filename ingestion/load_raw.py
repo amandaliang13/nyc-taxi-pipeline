@@ -2,8 +2,14 @@
 raw schema, partitioned by source_month.
 
 Normalized-on-load only: column names are snake_cased, integer code columns are
-cast to int (TLC stores some as double), and a source_month column is appended.
+cast to int (TLC stores some as double), and two lineage columns are appended:
+source_month and source_row_number (1-based position in the Parquet file).
 No filtering, dedup, or business logic.
+
+(source_month, source_row_number) is the stable trip identity downstream: it
+survives reloads of the same file. A TLC republish of a month may reorder rows,
+so that month's keys can change -- acceptable, since every layer replaces a
+month as a whole.
 """
 
 import io
@@ -38,15 +44,24 @@ _INT_COLUMNS = (
 _BATCH_ROWS = 500_000
 
 
-def _normalize_batch(batch: pa.RecordBatch, source_month: str) -> pa.Table:
-    """snake_case names, cast integer columns, append source_month."""
+def _normalize_batch(batch: pa.RecordBatch, source_month: str, start_row: int) -> pa.Table:
+    """snake_case names, cast integer columns, append source_month and source_row_number.
+
+    start_row is the 1-based file position of the batch's first row.
+    """
     table = pa.Table.from_batches([batch])
     table = table.rename_columns([_COLUMN_RENAMES.get(c, c.lower()) for c in table.column_names])
     for name in _INT_COLUMNS:
         if name in table.column_names:
             idx = table.column_names.index(name)
             table = table.set_column(idx, name, pc.cast(table[name], pa.int16()))
-    return table.append_column("source_month", pa.array([source_month] * table.num_rows, pa.string()))
+    table = table.append_column(
+        "source_month", pa.array([source_month] * table.num_rows, pa.string())
+    )
+    return table.append_column(
+        "source_row_number",
+        pa.array(range(start_row, start_row + table.num_rows), pa.int32()),
+    )
 
 
 def load_month(
@@ -85,7 +100,7 @@ def load_month(
         with raw_conn.cursor() as cur:
             cur.execute(delete_stmt, (source_month,))
             for batch in parquet.iter_batches(batch_size=_BATCH_ROWS):
-                batch_table = _normalize_batch(batch, source_month)
+                batch_table = _normalize_batch(batch, source_month, row_count + 1)
                 copy_stmt = sql.SQL("COPY {} ({}) FROM STDIN WITH (FORMAT CSV)").format(
                     qualified,
                     sql.SQL(", ").join(sql.Identifier(c) for c in batch_table.column_names),

@@ -1,7 +1,8 @@
 -- raw.trips: unmodified landing table for NYC TLC yellow taxi monthly Parquet files.
 -- Loaded by ingestion/load_raw.py; no cleaning/filtering -- DQ flagging happens in dbt staging.
--- id is a technical PK only -- idempotency comes from load_month()'s DELETE+COPY per
--- source_month, not a uniqueness constraint on the data columns.
+-- id is a technical PK only, regenerated on every reload -- idempotency comes from
+-- load_month()'s DELETE+COPY per source_month. The stable row identity is
+-- (source_month, source_row_number): the row's position in the TLC file.
 -- Schema drift: cbd_congestion_fee is absent from the source entirely before source_month
 -- 2025-01, not just null-valued. Same for request_source before source_month 2026-06.
 
@@ -30,14 +31,21 @@ CREATE TABLE IF NOT EXISTS raw.trips (
     airport_fee             numeric(10, 2),
     cbd_congestion_fee      numeric(10, 2),
     request_source          text,
-    source_month            text NOT NULL
+    source_month            text NOT NULL,
+    source_row_number       integer NOT NULL
 );
 
 -- CREATE TABLE IF NOT EXISTS won't touch a warehouse built before request_source existed.
 ALTER TABLE raw.trips ADD COLUMN IF NOT EXISTS request_source text;
+-- Same for source_row_number. It is nullable here because existing rows have no file
+-- position; they stay NULL until their month is reloaded (scripts/backfill.sh).
+ALTER TABLE raw.trips ADD COLUMN IF NOT EXISTS source_row_number integer;
 
--- Backs both load_raw.py's DELETE-by-partition and dbt's source_month filters.
-CREATE INDEX IF NOT EXISTS idx_trips_source_month ON raw.trips (source_month);
+-- Natural key: one row per position in each month's file. Its leading source_month
+-- column also backs load_raw.py's DELETE-by-partition and dbt's source_month filters.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trips_source_row ON raw.trips (source_month, source_row_number);
+-- The single-column index it replaces is redundant; drop it from older warehouses.
+DROP INDEX IF EXISTS raw.idx_trips_source_month;
 
 COMMENT ON TABLE raw.trips IS
     'TLC yellow taxi trips, landed unmodified from S3 raw/. source_month is appended on load, not part of the source.';
@@ -54,3 +62,5 @@ COMMENT ON COLUMN raw.trips.request_source IS
     'Trip request channel code (e.g. HV0003, HV0005, A, CC), added by TLC from 2026-06. NULL before source_month 2026-06 by schema absence, not a data quality issue.';
 COMMENT ON COLUMN raw.trips.source_month IS
     'Ingestion partition tag "YYYY-MM", appended by load_raw.py. Basis for idempotent reload and downstream incremental filtering.';
+COMMENT ON COLUMN raw.trips.source_row_number IS
+    '1-based row position in the TLC Parquet file, appended by load_raw.py. Stable across reloads of the same file; a TLC republish of the month may renumber it.';
