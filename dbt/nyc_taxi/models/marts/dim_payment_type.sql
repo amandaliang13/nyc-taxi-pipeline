@@ -1,2 +1,5 @@
 -- Static dimension, small lookup.
--- TODO : build from stg_payment_types.
+select
+    payment_type_id,
+    payment_type_name
+from {{ ref('stg_payment_types') }}

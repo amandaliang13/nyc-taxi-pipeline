@@ -1,2 +1,5 @@
 -- Static dimension, trivial but included for completeness.
--- TODO : build from stg_vendors.
+select
+    vendor_id,
+    vendor_name
+from {{ ref('stg_vendors') }}

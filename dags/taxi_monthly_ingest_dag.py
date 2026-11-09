@@ -137,6 +137,9 @@ def taxi_monthly_ingest():
         - normalized-on-load: snake_case columns, nullable superset schema,
           minimal coercion.
         - manifest upsert drives backfill visibility and "which months need dbt".
+          Ordering invariant: mark_loaded runs only after load_month has committed
+          raw.trips, so any dbt build that sees the new loaded_at also sees the new
+          rows (fact_trips rebuilds a month when loaded_at moves).
         - on success, emits a RAW_TRIPS_LOADED asset event (schedules DAG 2).
 
         Returns {"source_month": ..., "row_count": ...}.

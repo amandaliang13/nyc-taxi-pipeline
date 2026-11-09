@@ -15,6 +15,15 @@ vars:
   # DQ rule: a zero-distance trip charging more than the initial meter fare is invalid.
   # NYC yellow-taxi initial charge = $3.00.
   min_flag_drop_fare: 3.00
+  # dim_date spine (end exclusive). Both ends leave a day outside 2023-01 .. 2030-12
+  # for the one-day out-of-month tolerance in stg_trips. After changing them, rerun
+  # scripts/generate_us_holidays.py (it reads these two vars).
+  dim_date_start: '2022-12-31'
+  dim_date_end: '2031-01-02'
+  # fact_trips rebuilds every source_month >= this ('YYYY-MM', zero-padded; anything
+  # else is a compile error) on the next incremental run. Set it per run only
+  # (--vars), per the README runbook.
+  fact_rebuild_from: '9999-12'
 
 # Schemas are used verbatim (macros/generate_schema_name.sql), not appended to
 # the profile's base schema.
@@ -34,6 +43,12 @@ seeds:
   nyc_taxi:
     +schema: seeds
     +quote_columns: false  # TLC's "LocationID" header lands as locationid
+    congestion_relief_zone:
+      +column_types:
+        effective_from: date
+    us_holidays:
+      +column_types:
+        holiday_date: date
 
 snapshots:
   nyc_taxi:

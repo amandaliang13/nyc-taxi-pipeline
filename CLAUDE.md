@@ -8,14 +8,15 @@ Never commit or push without explicit approval, even when the work feels done.
 
 ## Project status
 
-**Ingestion and dbt staging built; marts not yet.** The project layout and architecture decisions are final (see `architecture.md`). Built:
-- Ingestion layer (`ingestion/`, DAG 1 tasks, `sql/` DDL), covered by `tests/test_idempotency.py` (rerun, out-of-order backfill, rollback, schema drift — ingestion layer only; the dbt/`fact_trips` half comes with the marts).
+**Ingestion, dbt staging and marts built; presentation and DAG 2 not yet.** The project layout and architecture decisions are final (see `architecture.md`). Built:
+- Ingestion layer (`ingestion/`, DAG 1 tasks, `sql/` DDL), covered by `tests/test_idempotency.py` (rerun, out-of-order backfill, rollback, schema drift, stable `source_row_number` — ingestion layer only; the dbt/`fact_trips` half is Phase 6).
 - `scripts/backfill.sh` and DAG 1's side of the trigger: `load_raw_postgres` declares `outlets=[RAW_TRIPS_LOADED]` (`dags/assets.py`).
 - dbt foundation: schema routing, seeds, `dbt_utils`, and the staging models (`stg_trips` with per-rule DQ flags + `is_valid_trip`).
+- dbt marts: `fact_trips` (incremental by `source_month`), `dim_zones` (SCD2 on CRZ membership), `dim_date`, `dim_payment_type`, `dim_vendor`, `dim_rate_code`; the `taxi_zone_lookup_snapshot` audit trail; the tests the design depends on (full suite is Phase 6).
 
 Still stubbed out or unimplemented:
 - `dags/taxi_transform_and_test_dag.py` — empty stub, so nothing consumes the asset yet (`schedule=[RAW_TRIPS_LOADED]` comes with it)
-- dbt marts and presentation models, and `snapshots/dim_zones_snapshot.sql` — comment-only files; `dbt run` errors on them until they're built
+- `models/presentation/mart_zone_hourly_demand.sql` — comment-only; `dbt run` errors on it until it's built, so exclude it (`--exclude mart_zone_hourly_demand`)
 
 A file's existence doesn't mean its logic is written. Check contents before you build on top of it.
 
@@ -55,12 +56,16 @@ dbt (run from the repo root, against the host-published warehouse Postgres). dbt
 ```bash
 mkdir -p ~/.dbt && cp dbt/nyc_taxi/profiles.yml.example ~/.dbt/profiles.yml   # once per machine
 uv run --env-file .env dbt deps --project-dir dbt/nyc_taxi       # once per checkout: dbt_utils
-uv run --env-file .env dbt seed --project-dir dbt/nyc_taxi       # zone lookup, payment types, vendors, holidays
+uv run --env-file .env dbt seed --project-dir dbt/nyc_taxi       # zone lookup, CRZ zones, payment types, vendors, rate codes, holidays
 uv run --env-file .env dbt run --project-dir dbt/nyc_taxi        # all models
 uv run --env-file .env dbt run --select stg_trips --project-dir dbt/nyc_taxi   # single model
 uv run --env-file .env dbt test --project-dir dbt/nyc_taxi
-uv run --env-file .env dbt snapshot --project-dir dbt/nyc_taxi   # dim_zones SCD2
+uv run --env-file .env dbt snapshot --project-dir dbt/nyc_taxi   # zone lookup audit trail (nothing joins to it)
+uv run --env-file .env dbt run --select fact_trips --vars '{fact_rebuild_from: "YYYY-MM"}' --project-dir dbt/nyc_taxi   # force-rebuild months >= YYYY-MM
+uv run python scripts/generate_us_holidays.py                    # regenerate the holiday seed after widening dim_date
 ```
+
+Build order doesn't matter for `dim_zones` (it's built from events, not the snapshot). When `seeds/congestion_relief_zone.csv` changes, or TLC republishes a month, follow the runbook in `README.md` — `fact_trips` has to be rebuilt.
 
 Required env vars (see `.env`, not committed; see `.env.example` for descriptions): `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_VAR`.
 
@@ -82,7 +87,7 @@ TLC (Parquet, monthly)
 | Stage | Owner | Does | Must NOT do |
 |---|---|---|---|
 | TLC → S3 | `ingestion/` | download, write to S3 unmodified | any cleaning/filtering/reshaping |
-| S3 → `raw` | `ingestion/` | bulk load, columns as-is (snake_cased, `source_month` appended) | type coercion beyond Postgres defaults, or dropping rows |
+| S3 → `raw` | `ingestion/` | bulk load, columns as-is (snake_cased, `source_month` + `source_row_number` appended) | type coercion beyond Postgres defaults, or dropping rows |
 | `raw` → `staging` | dbt | cast types, rename, flag `is_valid_trip` | aggregation, cross-entity joins |
 | `staging` → `marts` | dbt | build fact/dims | cleaning (already done upstream) |
 
@@ -94,15 +99,17 @@ TLC (Parquet, monthly)
 
 **Idempotency is two-layered, both keyed on `source_month` ("YYYY-MM")**:
 - `raw.trips`: `load_month()` does `DELETE WHERE source_month = %s` + `COPY` in one transaction (`ingestion/load_raw.py`) — a rerun never duplicates rows.
-- `control.manifest`: audit/idempotency table (`sql/control/manifest.sql`), PK `(taxi_type, source_month)`, upserted (not inserted) by `mark_loaded()` so a rerun updates the existing row. Row presence = loaded, no status column.
+- `control.manifest`: audit/idempotency table (`sql/control/manifest.sql`), PK `(taxi_type, source_month)`, upserted (not inserted) by `mark_loaded()` so a rerun updates the existing row. Row presence = loaded, no status column. `mark_loaded()` runs only after `load_month()` has committed, so a dbt build that sees the new `loaded_at` also sees the new rows.
 
 Out-of-order backfills (loading month N+2 before N) must not corrupt state — this is meant to be tested explicitly in `tests/test_idempotency.py`, not just asserted.
 
-**`fact_trips` is insert-only by pickup month, not merge/upsert** — TLC doesn't correct published files in place, so upsert complexity was deliberately rejected.
+The stable trip identity is `(source_month, source_row_number)` — the row's position in its month's file, hashed into `trip_key`. `raw.trips.id` is regenerated on every reload. A TLC republish may renumber a month, which is fine because every layer replaces a month as a whole.
 
-**`dim_zones` is a dbt snapshot (SCD Type 2), not a hand-rolled mart model** — dbt's snapshot feature directly captures `valid_from`/`valid_to`/`is_current`.
+**`fact_trips` is incremental by `source_month`: whole-month delete+insert, not row-level merge/upsert.** TLC does republish files (errata, the 2022 Parquet re-release), so a month is the unit of change, and trip rows have no key that survives a republish — a row-level merge would have nothing reliable to match on. A month is rebuilt when `control.manifest.loaded_at` differs from (`is distinct from`, not just later than) the one it was built from, so a republished month is handled by re-running `scripts/backfill.sh` for it (DAG 1 doesn't skip loaded months). Not keyed on pickup month, because files carry stray pickups from other months; no `max(pickup_datetime)` watermark, because it would skip month N loaded after N+2.
 
-**Bad data is flagged, not deleted.** DQ rules (negative fare, zero distance with fare above `var('min_flag_drop_fare')`, dropoff ≤ pickup, duration > 24h, location_id not in the zone lookup) each get a boolean flag in `stg_trips`, and `is_valid_trip` = none fired. Downstream marts filter on the flag instead of dropping the row at ingest, so exclusions stay auditable.
+**`dim_zones` is SCD Type 2 on Congestion Relief Zone membership, built from an event table, not a dbt snapshot.** TLC publishes the zone lookup as a single undated file that is overwritten in place; known revisions only touched placeholder rows 264/265 and added `service_zone`, with no effective dates — so there's no lookup history to capture. CRZ membership (MTA's official CBD taxi-zone list, effective 2025-01-05, `seeds/congestion_relief_zone.csv`) is a real, dated change. Zone name, borough and service_zone are Type 1. `fact_trips` stores the pickup/dropoff zone version keys, resolved by pickup time, and leaves them NULL when `is_pickup_outside_source_month` (a pickup far from its file's month can't be trusted to pick a version). `snapshots/taxi_zone_lookup_snapshot.sql` is only an audit trail of the committed lookup seed; nothing joins to it.
+
+**Bad data is flagged, not deleted.** DQ rules (negative fare, zero distance with fare above `var('min_flag_drop_fare')`, dropoff ≤ pickup, duration > 24h, location_id not in the zone lookup or = 264 "Unknown", pickup date outside the file's month with ±1 day tolerance) each get a boolean flag in `stg_trips`, and `is_valid_trip` = none fired. `is_outside_nyc` (zone 265) is informational, not a rule. Downstream marts filter on the flag instead of dropping the row at ingest, so exclusions stay auditable; `fact_trips` keeps all rows and every flag.
 
 **Known schema drift to preserve, not paper over:** `cbd_congestion_fee` is absent (not merely null) from TLC's schema before `source_month 2025-01` (NYC congestion pricing, effective 2025-01-05). `raw.trips` already models this as a nullable column. Likewise `request_source` (text) is absent before `source_month 2026-06`. Staging and marts logic should treat the absence as a documented drift event, not a data quality defect.
 

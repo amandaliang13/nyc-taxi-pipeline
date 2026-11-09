@@ -9,12 +9,42 @@ sources:
       - name: trips
         description: TLC yellow-taxi trips, landed unmodified; one load per source_month.
 
+  - name: control
+    description: Python-owned ingestion control plane (ingestion/manifest.py).
+    schema: control
+    tables:
+      - name: manifest
+        description: >
+          One row per loaded (taxi_type, source_month), upserted by mark_loaded() only
+          after raw.trips has committed. fact_trips rebuilds a month when its loaded_at
+          differs from the one the fact was built from.
+        data_tests:
+          # fact_trips joins on (source_month, taxi_type = 'yellow'); a second row per
+          # pair would silently duplicate every trip of that month.
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [taxi_type, source_month]
+
 models:
   - name: stg_trips
     description: >
       One row per raw trip: renamed, typed, and flagged. Rows are never dropped;
-      marts filter on is_valid_trip.
+      marts filter on is_valid_trip. A ~110M-row view, so key uniqueness is tested
+      on fact_trips, not here.
     columns:
+      - name: trip_key
+        description: >
+          Surrogate of (source_month, source_row_number), the row's position in its
+          month's TLC file. Stable across reloads of the same file; a TLC republish of
+          the month may renumber it (the month is replaced as a whole downstream).
+      - name: raw_trip_id
+        description: raw.trips.id, a technical id regenerated on every reload. Not a key.
+      - name: pickup_location_in_lookup
+        description: pickup_location_id is non-null and present in the zone lookup.
+      - name: dropoff_location_in_lookup
+        description: dropoff_location_id is non-null and present in the zone lookup.
+      - name: request_source
+        description: Trip request channel. NULL before source_month 2026-06 by schema absence (drift, not DQ).
       - name: is_negative_fare
         description: fare_amount < 0.
       - name: is_zero_distance_charged
@@ -24,6 +54,21 @@ models:
       - name: is_over_24h
         description: trip_duration > 24 hours.
       - name: is_unknown_location
-        description: pickup or dropoff location_id missing from the zone lookup.
+        description: >
+          Pickup or dropoff location_id is missing from the zone lookup, or is 264
+          (the lookup's "Unknown" placeholder row).
+      - name: is_pickup_outside_source_month
+        description: >
+          Pickup date falls outside the file's month, with a one-day tolerance either
+          side ([first day - 1 day, last day + 1 day]) for trips crossing a month
+          boundary. TLC files carry stray rows, some years off; a missing pickup is
+          flagged too. A DQ rule in its own right; the dim_date FK test filters on it
+          as a consequence.
+      - name: is_outside_nyc
+        description: >
+          Pickup or dropoff is zone 265 ("Outside of NYC"). Informational, not a DQ
+          rule, and not part of is_valid_trip: trips to Newark or Westchester are real.
       - name: is_valid_trip
-        description: True when no DQ flag is set. cbd_congestion_fee NULLs (pre-2025-01 schema drift) never count.
+        description: >
+          True when no DQ rule fired. Schema-drift NULLs (cbd_congestion_fee before
+          2025-01, request_source before 2026-06) and is_outside_nyc never count.
