@@ -22,6 +22,12 @@ seeds:
       the Polygon column dropped. effective_from is not in the source: it was added
       here as the tolling start date, 2025-01-05. After changing this file, follow the
       README runbook (fact_trips must be rebuilt).
+      Cross-check (2026-05, valid trips that start and end in the same zone, zones with
+      at least 100 such trips): the share charged cbd_congestion_fee is 68-98% in the
+      35 listed zones and 3% on average elsewhere. The outliers are zones on the 60th St
+      boundary that MTA left out, where a same-zone trip can still enter the CRZ:
+      Lincoln Square East 44%, Central Park 33%, Upper East Side South 26%, Lincoln
+      Square West 21%, Lenox Hill West 19%, Lenox Hill East 16%.
     columns:
       - name: location_id
         data_tests:
