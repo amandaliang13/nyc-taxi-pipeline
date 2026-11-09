@@ -1,5 +1,5 @@
 -- TLC zone lookup, renamed. Feeds the location DQ rule in stg_trips and the
--- dim_zones snapshot (Phase 5).
+-- dim_zones snapshot.
 select
     locationid::smallint as location_id,
     borough,

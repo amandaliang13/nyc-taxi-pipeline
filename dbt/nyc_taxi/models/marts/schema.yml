@@ -1,5 +1,82 @@
-# TODO: schema tests (not_null, unique, relationships) for
-# fact_trips and all dims.
+# Marts docs + the tests the Phase 5 design depends on. The full suite comes in Phase 6.
 version: 2
 
-models: []
+models:
+  - name: dim_zones
+    description: >
+      One row per zone version. SCD Type 2 on is_in_congestion_relief_zone (MTA CRZ,
+      from seeds/congestion_relief_zone.csv); borough, zone_name and service_zone are
+      Type 1 (every version shows the current value). Versions are [valid_from,
+      valid_to); the first starts 1900-01-01 and the current one ends 9999-12-31.
+    columns:
+      - name: zone_version_key
+        description: Surrogate of (location_id, valid_from).
+        data_tests: [unique, not_null]
+
+  - name: dim_date
+    description: One row per calendar day over var('dim_date_start') .. var('dim_date_end') (end exclusive).
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: dim_rate_code
+    columns:
+      - name: rate_code_id
+        data_tests: [unique, not_null]
+
+  - name: fact_trips
+    description: >
+      One row per raw trip, valid and invalid, incremental by source_month
+      (whole-month delete+insert). Zone version keys are resolved at load by pickup
+      time.
+    columns:
+      - name: trip_key
+        data_tests: [unique, not_null]
+
+      - name: raw_loaded_at
+        description: control.manifest.loaded_at the month was built from (timestamptz, same type as the manifest).
+
+      - name: pickup_date
+        data_tests:
+          # Pickups outside the file's month can be years off and outside the spine.
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+              config:
+                where: "not is_pickup_outside_source_month"
+
+      # Version keys get two tests each, with separate jobs:
+      #   not_null (filtered): a key should exist but the join failed. The filter
+      #     excludes only rows where NULL is by design: the location isn't in the
+      #     lookup, or the pickup is outside the file's month (which includes a NULL
+      #     pickup), where fact_trips deliberately leaves the key NULL.
+      #   relationships (unfiltered): a key exists but dim_zones no longer has it,
+      #     i.e. stale keys after dim_zones is rebuilt.
+      # tests/singular/assert_trip_zone_version_covers_pickup.sql catches the third
+      # case: a key that exists but points at the wrong version.
+      - name: pickup_zone_version_key
+        data_tests:
+          - not_null:
+              config:
+                where: "pickup_location_in_lookup and not is_pickup_outside_source_month"
+          - relationships:
+              arguments:
+                to: ref('dim_zones')
+                field: zone_version_key
+      - name: dropoff_zone_version_key
+        data_tests:
+          - not_null:
+              config:
+                where: "dropoff_location_in_lookup and not is_pickup_outside_source_month"
+          - relationships:
+              arguments:
+                to: ref('dim_zones')
+                field: zone_version_key
+
+      - name: ratecode_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_rate_code')
+                field: rate_code_id
