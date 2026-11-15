@@ -22,9 +22,6 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
-    # Signs the JWT the api-server sends to the worker log server (:8793) to
-    # fetch task logs. Must be identical in every component; left unset, each
-    # container writes its own airflow.cfg with a random key.
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-airflow_api_secret_key}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
