@@ -9,6 +9,11 @@
   `mutually_exclusive_ranges` on `dim_zones`, every pickup time maps to exactly one
   version.
 
-Still to come (Phase 6): DQ flag consistency on `fact_trips` (the rule logic itself is
-unit-tested on `stg_trips`), schema drift boundaries, and the `fact_trips` ↔
+- `assert_dq_flags_match_rules.sql`: re-derives every DQ rule (architecture.md §3)
+  from `fact_trips`' own columns and checks the stored flags and `is_valid_trip`
+  against them, in one scan. Catches months built before a rule or threshold change
+  (see the README runbook). The rule logic itself, boundaries included, is
+  unit-tested in `models/staging/stg_trips_unit_tests.yml`.
+
+Still to come (Phase 6): schema drift boundaries and the `fact_trips` ↔
 `control.manifest` reconciliation.

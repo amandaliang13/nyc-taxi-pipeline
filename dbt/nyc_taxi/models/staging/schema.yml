@@ -1,5 +1,6 @@
 # Source defs + model docs. stg_trips is a view over every raw row, so data tests on
-# trips run against fact_trips (models/marts/schema.yml, tests/singular/).
+# trips run against fact_trips (models/marts/schema.yml, tests/singular/). The DQ
+# rule logic is unit-tested on mocked rows in stg_trips_unit_tests.yml.
 version: 2
 
 sources:

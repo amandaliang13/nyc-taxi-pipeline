@@ -1,0 +1,194 @@
+# Unit tests for the DQ rules in stg_trips (architecture.md §3): one test per rule,
+# with rows on both sides of each boundary. The inputs are mocked, so these tests
+# need no loaded data. tests/singular/assert_dq_flags_match_rules.sql checks the
+# flags stored on fact_trips against the same rules.
+#
+# Every trip row starts from &clean (defined in the first test): a trip in
+# source_month 2024-03 that no rule flags. Each row overrides only what it tests.
+# Expected rows are keyed on source_row_number.
+# Rows marked "pinned" record current behaviour that no rule covers: when a field a
+# rule reads is NULL, that rule doesn't fire. Changing this is a rule change.
+version: 2
+
+unit_tests:
+  - name: stg_trips_negative_fare
+    description: fare_amount < 0 is invalid. Zero and NULL fares are not flagged.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - &clean
+            source_month: '2024-03'
+            source_row_number: 1
+            tpep_pickup_datetime: '2024-03-10 08:00:00'
+            tpep_dropoff_datetime: '2024-03-10 08:15:00'
+            trip_distance: 2.5
+            fare_amount: 12.10
+            pu_location_id: 161
+            do_location_id: 237
+          - {<<: *clean, source_row_number: 2, fare_amount: -0.01}
+          - {<<: *clean, source_row_number: 3, fare_amount: 0}
+          - {<<: *clean, source_row_number: 4, fare_amount: null}  # pinned
+      - input: ref('stg_zones')
+        rows: &zones
+          - {location_id: 161}
+          - {location_id: 237}
+          - {location_id: 264}  # "Unknown"
+          - {location_id: 265}  # "Outside of NYC"
+    expect:
+      rows:
+        - {source_row_number: 1, is_negative_fare: false, is_valid_trip: true}
+        - {source_row_number: 2, is_negative_fare: true, is_valid_trip: false}
+        - {source_row_number: 3, is_negative_fare: false, is_valid_trip: true}
+        - {source_row_number: 4, is_negative_fare: false, is_valid_trip: true}
+
+  - name: stg_trips_zero_distance_charged
+    description: >
+      trip_distance = 0 with fare_amount above var('min_flag_drop_fare') (3.00) is
+      invalid. A fare equal to the threshold is not.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1, trip_distance: 0, fare_amount: 3.00}
+          - {<<: *clean, source_row_number: 2, trip_distance: 0, fare_amount: 3.01}
+          - {<<: *clean, source_row_number: 3, trip_distance: 0.01, fare_amount: 50.00}
+          - {<<: *clean, source_row_number: 4, trip_distance: 0, fare_amount: null}  # pinned
+          - {<<: *clean, source_row_number: 5, trip_distance: null, fare_amount: 50.00}  # pinned
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_zero_distance_charged: false, is_valid_trip: true}
+        - {source_row_number: 2, is_zero_distance_charged: true, is_valid_trip: false}
+        - {source_row_number: 3, is_zero_distance_charged: false, is_valid_trip: true}
+        - {source_row_number: 4, is_zero_distance_charged: false, is_valid_trip: true}
+        - {source_row_number: 5, is_zero_distance_charged: false, is_valid_trip: true}
+
+  - name: stg_trips_zero_distance_reads_min_flag_drop_fare_var
+    description: The zero-distance threshold comes from var('min_flag_drop_fare'), not a literal.
+    model: stg_trips
+    overrides:
+      vars:
+        min_flag_drop_fare: 5.00
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1, trip_distance: 0, fare_amount: 4.00}
+          - {<<: *clean, source_row_number: 2, trip_distance: 0, fare_amount: 5.01}
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_zero_distance_charged: false, is_valid_trip: true}
+        - {source_row_number: 2, is_zero_distance_charged: true, is_valid_trip: false}
+
+  - name: stg_trips_nonpositive_duration
+    description: dropoff <= pickup is invalid. One second after pickup is not.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1}
+          - {<<: *clean, source_row_number: 2, tpep_dropoff_datetime: '2024-03-10 08:00:00'}
+          - {<<: *clean, source_row_number: 3, tpep_dropoff_datetime: '2024-03-10 07:59:00'}
+          - {<<: *clean, source_row_number: 4, tpep_dropoff_datetime: '2024-03-10 08:00:01'}
+          - {<<: *clean, source_row_number: 5, tpep_dropoff_datetime: null}  # pinned
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_nonpositive_duration: false, is_valid_trip: true}
+        - {source_row_number: 2, is_nonpositive_duration: true, is_valid_trip: false}
+        - {source_row_number: 3, is_nonpositive_duration: true, is_valid_trip: false}
+        - {source_row_number: 4, is_nonpositive_duration: false, is_valid_trip: true}
+        - {source_row_number: 5, is_nonpositive_duration: false, is_valid_trip: true}
+
+  - name: stg_trips_over_24h
+    description: A trip longer than 24 hours is invalid. Exactly 24 hours is not.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1, tpep_dropoff_datetime: '2024-03-11 08:00:00'}
+          - {<<: *clean, source_row_number: 2, tpep_dropoff_datetime: '2024-03-11 08:00:01'}
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_over_24h: false, is_valid_trip: true}
+        - {source_row_number: 2, is_over_24h: true, is_valid_trip: false}
+
+  - name: stg_trips_unknown_location
+    description: >
+      A pickup or dropoff location that is NULL, missing from the zone lookup, or 264
+      ("Unknown") is invalid. Zone 265 ("Outside of NYC") is only informational.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1}
+          - {<<: *clean, source_row_number: 2, pu_location_id: 264}
+          - {<<: *clean, source_row_number: 3, do_location_id: 264}
+          - {<<: *clean, source_row_number: 4, pu_location_id: 999}
+          - {<<: *clean, source_row_number: 5, pu_location_id: null}
+          - {<<: *clean, source_row_number: 6, do_location_id: null}
+          - {<<: *clean, source_row_number: 7, pu_location_id: 265}
+          - {<<: *clean, source_row_number: 8, do_location_id: 265}
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_unknown_location: false, pickup_location_in_lookup: true, dropoff_location_in_lookup: true, is_outside_nyc: false, is_valid_trip: true}
+        - {source_row_number: 2, is_unknown_location: true, pickup_location_in_lookup: true, dropoff_location_in_lookup: true, is_outside_nyc: false, is_valid_trip: false}
+        - {source_row_number: 3, is_unknown_location: true, pickup_location_in_lookup: true, dropoff_location_in_lookup: true, is_outside_nyc: false, is_valid_trip: false}
+        - {source_row_number: 4, is_unknown_location: true, pickup_location_in_lookup: false, dropoff_location_in_lookup: true, is_outside_nyc: false, is_valid_trip: false}
+        - {source_row_number: 5, is_unknown_location: true, pickup_location_in_lookup: false, dropoff_location_in_lookup: true, is_outside_nyc: false, is_valid_trip: false}
+        - {source_row_number: 6, is_unknown_location: true, pickup_location_in_lookup: true, dropoff_location_in_lookup: false, is_outside_nyc: false, is_valid_trip: false}
+        - {source_row_number: 7, is_unknown_location: false, pickup_location_in_lookup: true, dropoff_location_in_lookup: true, is_outside_nyc: true, is_valid_trip: true}
+        - {source_row_number: 8, is_unknown_location: false, pickup_location_in_lookup: true, dropoff_location_in_lookup: true, is_outside_nyc: true, is_valid_trip: true}
+
+  - name: stg_trips_pickup_outside_source_month
+    description: >
+      For source_month 2024-03 (a leap year), pickup dates from 2024-02-29 to
+      2024-04-01 are tolerated (one day either side). Earlier, later or NULL pickups
+      are invalid.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1, tpep_pickup_datetime: '2024-02-29 00:00:00', tpep_dropoff_datetime: '2024-02-29 00:15:00'}
+          - {<<: *clean, source_row_number: 2, tpep_pickup_datetime: '2024-02-28 23:59:59', tpep_dropoff_datetime: '2024-02-29 00:14:59'}
+          - {<<: *clean, source_row_number: 3, tpep_pickup_datetime: '2024-04-01 23:59:59', tpep_dropoff_datetime: '2024-04-02 00:14:59'}
+          - {<<: *clean, source_row_number: 4, tpep_pickup_datetime: '2024-04-02 00:00:00', tpep_dropoff_datetime: '2024-04-02 00:15:00'}
+          - {<<: *clean, source_row_number: 5, tpep_pickup_datetime: null}
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_pickup_outside_source_month: false, is_valid_trip: true}
+        - {source_row_number: 2, is_pickup_outside_source_month: true, is_valid_trip: false}
+        - {source_row_number: 3, is_pickup_outside_source_month: false, is_valid_trip: true}
+        - {source_row_number: 4, is_pickup_outside_source_month: true, is_valid_trip: false}
+        - {source_row_number: 5, is_pickup_outside_source_month: true, is_valid_trip: false}
+
+  - name: stg_trips_is_valid_trip_ignores_schema_drift
+    description: >
+      Schema-drift NULLs (cbd_congestion_fee before 2025-01, request_source before
+      2026-06) never make a trip invalid. Several rules can fire on one trip.
+    model: stg_trips
+    given:
+      - input: source('raw', 'trips')
+        rows:
+          - {<<: *clean, source_row_number: 1, source_month: '2024-12', tpep_pickup_datetime: '2024-12-10 08:00:00', tpep_dropoff_datetime: '2024-12-10 08:15:00', cbd_congestion_fee: null, request_source: null}
+          - {<<: *clean, source_row_number: 2, source_month: '2025-01', tpep_pickup_datetime: '2025-01-10 08:00:00', tpep_dropoff_datetime: '2025-01-10 08:15:00', cbd_congestion_fee: 0.75, request_source: null}
+          - {<<: *clean, source_row_number: 3, source_month: '2026-06', tpep_pickup_datetime: '2026-06-10 08:00:00', tpep_dropoff_datetime: '2026-06-10 08:15:00', cbd_congestion_fee: 0.75, request_source: 'HV0003'}
+          - {<<: *clean, source_row_number: 4, fare_amount: -5.00, pu_location_id: 264}
+      - input: ref('stg_zones')
+        rows: *zones
+    expect:
+      rows:
+        - {source_row_number: 1, is_negative_fare: false, is_unknown_location: false, is_valid_trip: true}
+        - {source_row_number: 2, is_negative_fare: false, is_unknown_location: false, is_valid_trip: true}
+        - {source_row_number: 3, is_negative_fare: false, is_unknown_location: false, is_valid_trip: true}
+        - {source_row_number: 4, is_negative_fare: true, is_unknown_location: true, is_valid_trip: false}

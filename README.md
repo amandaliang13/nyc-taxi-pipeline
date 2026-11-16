@@ -49,6 +49,16 @@ To rebuild less, replace `--full-refresh` with `--vars '{fact_rebuild_from: "YYY
 
 `dbt test -s assert_trip_zone_version_covers_pickup` fails until you rebuild `fact_trips`.
 
+### A DQ rule or threshold changes
+
+A rule in `stg_trips.sql` changed, or `min_flag_drop_fare` changed in `dbt_project.yml`. `fact_trips` is incremental, so the months it already built keep their old flags.
+
+```bash
+uv run --env-file .env dbt run -s fact_trips --full-refresh --project-dir dbt/nyc_taxi
+```
+
+`dbt test -s assert_dq_flags_match_rules` fails until you rebuild `fact_trips`. Change `min_flag_drop_fare` in `dbt_project.yml`, not with `--vars` on one run. Built months keep the value their run used, and the test checks them against the project value.
+
 ### TLC republishes a month
 
 ```bash
