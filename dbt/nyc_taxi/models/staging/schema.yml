@@ -1,4 +1,5 @@
-# Source defs + model docs. Column tests come in Phase 6.
+# Source defs + model docs. stg_trips is a view over every raw row, so data tests on
+# trips run against fact_trips (models/marts/schema.yml, tests/singular/).
 version: 2
 
 sources:

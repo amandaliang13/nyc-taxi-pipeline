@@ -1,4 +1,6 @@
-# Marts docs + the tests the Phase 5 design depends on. The full suite comes in Phase 6.
+# Marts docs + generic tests. Checks that span models or need a re-derivation live in
+# tests/singular/. Each test on fact_trips is a full scan, so per-column not_null
+# tests on the DQ flags are left to one consolidated singular test.
 version: 2
 
 models:
@@ -8,6 +10,16 @@ models:
       from seeds/congestion_relief_zone.csv); borough, zone_name and service_zone are
       Type 1 (every version shows the current value). Versions are [valid_from,
       valid_to); the first starts 1900-01-01 and the current one ends 9999-12-31.
+    data_tests:
+      # Per zone, versions neither overlap nor leave a gap, and each has
+      # valid_from < valid_to. tests/singular/assert_dim_zones_one_current_version.sql
+      # adds the ends: the history starts at 1900-01-01 and exactly one version is current.
+      - dbt_utils.mutually_exclusive_ranges:
+          arguments:
+            lower_bound_column: valid_from
+            upper_bound_column: valid_to
+            partition_by: location_id
+            gaps: not_allowed
     columns:
       - name: zone_version_key
         description: Surrogate of (location_id, valid_from).
@@ -17,6 +29,16 @@ models:
     description: One row per calendar day over var('dim_date_start') .. var('dim_date_end') (end exclusive).
     columns:
       - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: dim_payment_type
+    columns:
+      - name: payment_type_id
+        data_tests: [unique, not_null]
+
+  - name: dim_vendor
+    columns:
+      - name: vendor_id
         data_tests: [unique, not_null]
 
   - name: dim_rate_code
@@ -74,6 +96,21 @@ models:
                 to: ref('dim_zones')
                 field: zone_version_key
 
+      # Code FKs go to the seed-backed dims, so the seed stays the one list of valid
+      # codes (no accepted_values copy of it here). NULL codes pass, as in any
+      # relationships test.
+      - name: vendor_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_vendor')
+                field: vendor_id
+      - name: payment_type_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_payment_type')
+                field: payment_type_id
       - name: ratecode_id
         data_tests:
           - relationships:

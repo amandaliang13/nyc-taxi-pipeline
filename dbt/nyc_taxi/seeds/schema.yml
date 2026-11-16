@@ -38,7 +38,18 @@ seeds:
                 to: ref('taxi_zone_lookup')
                 field: locationid
       - name: effective_from
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          # Strictly after the dim_zones baseline (1900-01-01) and before the dim_date
+          # end. This seed is edited by hand: a typo such as 1899-01-05 sorts before the
+          # baseline, so the baseline version (outside the CRZ) covers every real trip.
+          # Every structural test on dim_zones still passes. A typo such as 2205 never
+          # takes effect at all.
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: "'1900-01-01'::date"
+                max_value: "'2031-01-01'::date"
+                inclusive: false
 
   - name: rate_codes
     description: >
