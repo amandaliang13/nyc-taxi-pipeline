@@ -1,5 +1,3 @@
-# Copy to ~/.dbt/profiles.yml and fill in real values (or source from .env).
-# NOT committed as profiles.yml — only this .example is version-controlled.
 nyc_taxi:
   target: dev
   outputs:

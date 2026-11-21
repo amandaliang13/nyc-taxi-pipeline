@@ -53,23 +53,27 @@ Airflow UI: `localhost:8080`.
 
 `compose.yaml` publishes warehouse Postgres to the host at `localhost:5432` (`${POSTGRES_PORT:-5432}`), so host-native dbt can connect to it directly. `.env` holds the host-side values `POSTGRES_HOST=localhost` and `POSTGRES_PORT`. Inside the Airflow containers, `compose.yaml` overrides them to `warehouse-db` and `5432`. So the same variable names work on both sides. The Airflow metadata DB lives in a separate, unpublished Postgres instance, as its own database (`airflow-metadata-db`). Never treat it as a schema under the warehouse.
 
-dbt runs from the repo root, against the host-published warehouse Postgres. dbt is a project dependency, so `uv run` installs it into `.venv`. dbt doesn't load `.env` itself. The profile reads the variables that `uv run --env-file .env` sets:
+dbt runs from the repo root, against the host-published warehouse Postgres. dbt is a project dependency, so `uv run` installs it into `.venv`. dbt (1.12+) loads `.env` itself, so dbt commands need no `--env-file`. It uses the nearest `.env` at or above the current directory, and variables already set in the shell win. `.env` sets:
+- `DBT_PROJECT_DIR=dbt/nyc_taxi`: the dbt project, so commands need no `--project-dir`.
+- `DBT_PROFILES_DIR=dbt/nyc_taxi`: the committed `dbt/nyc_taxi/profiles.yml`, which reads `POSTGRES_*`. dbt ignores `~/.dbt/profiles.yml`.
+- `DBT_SEND_ANONYMOUS_USAGE_STATS=False`: dbt sends no usage stats.
+
+Both paths are relative, so run dbt from the repo root.
 
 ```bash
-mkdir -p ~/.dbt && cp dbt/nyc_taxi/profiles.yml.example ~/.dbt/profiles.yml   # once per machine
-uv run --env-file .env dbt deps --project-dir dbt/nyc_taxi       # once per checkout: dbt_utils
-uv run --env-file .env dbt seed --project-dir dbt/nyc_taxi       # zone lookup, CRZ zones, payment types, vendors, rate codes, holidays
-uv run --env-file .env dbt run --project-dir dbt/nyc_taxi        # all models
-uv run --env-file .env dbt run --select stg_trips --project-dir dbt/nyc_taxi   # single model
-uv run --env-file .env dbt test --project-dir dbt/nyc_taxi
-uv run --env-file .env dbt snapshot --project-dir dbt/nyc_taxi   # zone lookup audit trail (nothing joins to it)
-uv run --env-file .env dbt run --select fact_trips --vars '{fact_rebuild_from: "YYYY-MM"}' --project-dir dbt/nyc_taxi   # force-rebuild months >= YYYY-MM
-uv run python scripts/generate_us_holidays.py                    # regenerate the holiday seed after widening dim_date
+uv run dbt deps        # once per checkout: dbt_utils
+uv run dbt seed        # zone lookup, CRZ zones, payment types, vendors, rate codes, holidays
+uv run dbt run         # all models
+uv run dbt run --select stg_trips   # single model
+uv run dbt test
+uv run dbt snapshot    # zone lookup audit trail (nothing joins to it)
+uv run dbt run --select fact_trips --vars '{fact_rebuild_from: "YYYY-MM"}'   # force-rebuild months >= YYYY-MM
+uv run python scripts/generate_us_holidays.py   # regenerate the holiday seed after widening dim_date
 ```
 
 Build order doesn't matter for `dim_zones`, because dbt builds it from events, not from the snapshot. You must rebuild `fact_trips` when `seeds/congestion_relief_zone.csv` changes or when TLC republishes a month. Follow the runbook in `README.md`.
 
-Required env vars live in `.env`, which is not in git. `.env.example` describes each one. The variables: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_VAR`.
+Required env vars live in `.env`, which is not in git. `.env.example` lists each one. The variables: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DBT_PROJECT_DIR`, `DBT_PROFILES_DIR`, `DBT_SEND_ANONYMOUS_USAGE_STATS`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_VAR`.
 
 ## Architecture
 

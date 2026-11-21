@@ -110,6 +110,8 @@ Files:
 - **`Dockerfile`** — base `apache/airflow:slim-3.3.1-python3.14`. It installs the `celery,redis,postgres,amazon,fab` extras against `constraints-3.14.txt`.
 - **`.dockerignore`** — excludes `.venv/`, `data/`, `.git/`, etc. Without this the build context includes the host venv and any downloaded Parquet, which is most of the size difference.
 - **`compose.yaml`** — `x-airflow-common` builds from `./Dockerfile` as `image: nyc-taxi-airflow:3.3.1` rather than pulling the stock image.
+  - It loads `.env` into the Airflow containers (`env_file`), then overrides the host-side values: `POSTGRES_HOST`/`POSTGRES_PORT` become `warehouse-db:5432`.
+  - `DBT_PROJECT_DIR` and `DBT_PROFILES_DIR` are relative host paths (`dbt/nyc_taxi`), which mean something else in a container. Nothing in the containers runs dbt yet. When DAG 2 does, `compose.yaml` must override both with the mounted project path.
 - Both Postgres services (Airflow metadata DB, taxi warehouse) on `postgres:18`.
 Two version notes worth tracking rather than assuming:
  
@@ -177,9 +179,9 @@ nyc-taxi-pipeline/
 │
 ├── dbt/
 │   └── nyc_taxi/
-│       ├── dbt_project.yml
+│       ├── dbt_project.yml              # found via DBT_PROJECT_DIR in .env
 │       ├── packages.yml                 # dbt_utils
-│       ├── profiles.yml.example
+│       ├── profiles.yml                 # reads POSTGRES_* env vars; found via DBT_PROFILES_DIR in .env
 │       ├── seeds/
 │       │   ├── taxi_zone_lookup.csv     # TLC zone lookup, Type 1 attributes of dim_zones
 │       │   ├── congestion_relief_zone.csv  # MTA CBD taxi zones + effective_from, the Type 2 events

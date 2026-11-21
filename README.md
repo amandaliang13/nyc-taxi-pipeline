@@ -19,9 +19,8 @@ docker compose up airflow-init             # once
 docker compose up -d                       # Airflow UI: localhost:8080
 scripts/backfill.sh 2024-01 2024-03        # load months
 
-mkdir -p ~/.dbt && cp dbt/nyc_taxi/profiles.yml.example ~/.dbt/profiles.yml   # once
-uv run --env-file .env dbt deps --project-dir dbt/nyc_taxi
-uv run --env-file .env dbt build --project-dir dbt/nyc_taxi --exclude mart_zone_hourly_demand
+uv run dbt deps   # dbt reads .env itself: DBT_PROJECT_DIR / DBT_PROFILES_DIR point at dbt/nyc_taxi
+uv run dbt build --exclude mart_zone_hourly_demand
 ```
 
 ## Tests
@@ -40,9 +39,9 @@ The tests use a throwaway Postgres database and mocked S3. If Postgres isn't rea
 `dbt/nyc_taxi/seeds/congestion_relief_zone.csv` changed (a new event, or an edited `effective_from`). The zone keys in `fact_trips` are now stale.
 
 ```bash
-uv run --env-file .env dbt seed -s congestion_relief_zone --project-dir dbt/nyc_taxi
-uv run --env-file .env dbt run -s dim_zones --project-dir dbt/nyc_taxi
-uv run --env-file .env dbt run -s fact_trips --full-refresh --project-dir dbt/nyc_taxi
+uv run dbt seed -s congestion_relief_zone
+uv run dbt run -s dim_zones
+uv run dbt run -s fact_trips --full-refresh
 ```
 
 To rebuild less, replace `--full-refresh` with `--vars '{fact_rebuild_from: "YYYY-MM"}'`. Use the month **before** the earliest affected date. For a new event, that date is its `effective_from`. For an edited one, it is the earlier of the old and new dates. Example: `2025-01-05` → `"2024-12"`.
@@ -54,7 +53,7 @@ To rebuild less, replace `--full-refresh` with `--vars '{fact_rebuild_from: "YYY
 A rule in `stg_trips.sql` changed, or `min_flag_drop_fare` changed in `dbt_project.yml`. `fact_trips` is incremental, so the months it already built keep their old flags.
 
 ```bash
-uv run --env-file .env dbt run -s fact_trips --full-refresh --project-dir dbt/nyc_taxi
+uv run dbt run -s fact_trips --full-refresh
 ```
 
 `dbt test -s assert_dq_flags_match_rules` fails until you rebuild `fact_trips`. Change `min_flag_drop_fare` in `dbt_project.yml`, not with `--vars` on one run. Built months keep the value their run used, and the test checks them against the project value.
