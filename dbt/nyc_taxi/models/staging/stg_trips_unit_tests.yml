@@ -1,4 +1,4 @@
-# Unit tests for the DQ rules in stg_trips (architecture.md §3): one test per rule,
+# Unit tests for the DQ rules in stg_trips: one test per rule,
 # with rows on both sides of each boundary. The inputs are mocked, so these tests
 # need no loaded data. tests/singular/assert_dq_flags_match_rules.sql checks the
 # flags stored on fact_trips against the same rules.

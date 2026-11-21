@@ -22,12 +22,6 @@ seeds:
       the Polygon column dropped. effective_from is not in the source: it was added
       here as the tolling start date, 2025-01-05. After changing this file, follow the
       README runbook (fact_trips must be rebuilt).
-      Cross-check (2026-05, valid trips that start and end in the same zone, zones with
-      at least 100 such trips): the share charged cbd_congestion_fee is 68-98% in the
-      35 listed zones and 3% on average elsewhere. The outliers are zones on the 60th St
-      boundary that MTA left out, where a same-zone trip can still enter the CRZ:
-      Lincoln Square East 44%, Central Park 33%, Upper East Side South 26%, Lincoln
-      Square West 21%, Lenox Hill West 19%, Lenox Hill East 16%.
     columns:
       - name: location_id
         data_tests:
@@ -40,11 +34,6 @@ seeds:
       - name: effective_from
         data_tests:
           - not_null
-          # Strictly after the dim_zones baseline (1900-01-01) and before the dim_date
-          # end. This seed is edited by hand: a typo such as 1899-01-05 sorts before the
-          # baseline, so the baseline version (outside the CRZ) covers every real trip.
-          # Every structural test on dim_zones still passes. A typo such as 2205 never
-          # takes effect at all.
           - dbt_utils.accepted_range:
               arguments:
                 min_value: "'1900-01-01'::date"

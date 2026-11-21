@@ -1,6 +1,4 @@
-# Source defs + model docs. stg_trips is a view over every raw row, so data tests on
-# trips run against fact_trips (models/marts/schema.yml, tests/singular/). The DQ
-# rule logic is unit-tested on mocked rows in stg_trips_unit_tests.yml.
+# Source defs + model docs.
 version: 2
 
 sources:
@@ -30,9 +28,7 @@ sources:
 models:
   - name: stg_trips
     description: >
-      One row per raw trip: renamed, typed, and flagged. Rows are never dropped;
-      marts filter on is_valid_trip. A ~110M-row view, so key uniqueness is tested
-      on fact_trips, not here.
+      One row per raw trip: renamed, typed, and flagged. Rows are never dropped.
     columns:
       - name: trip_key
         description: >
