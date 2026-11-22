@@ -14,6 +14,8 @@
 --   - rederived ends in "offset 0", so it stays a subquery and each rule is computed
 --     once per row. Inlined, every rule is computed again inside the is_valid_trip check.
 
+{{ config(fail_calc='coalesce(sum(bad_trips), 0)') }}
+
 with zones as not materialized (
     select location_id from {{ ref('stg_zones') }}
 ),
@@ -89,6 +91,11 @@ checked as (
     from rederived
 )
 
-select trip_key, source_month, failure_reason
+select
+    source_month,
+    failure_reason,
+    count(*)      as bad_trips,
+    min(trip_key) as example_trip_key
 from checked
 where failure_reason <> ''
+group by source_month, failure_reason
