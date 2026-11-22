@@ -16,16 +16,24 @@ It differs from the standard "taxi pipeline" portfolio project in four ways:
  
 **Source:** NYC TLC yellow taxi trip records (official TLC source), published monthly as Parquet.
  
-**Years included:** 2023, 2024, 2025 (full years, contiguous). The loaded months hold 3–4M trips each (2023-03: 3.40M, 2026-05: 4.09M), so the three years are roughly 110–150M trips.
- 
-**Why contiguous 2023–2025, not a COVID-excluding split:**
-- Delivers genuine, recent schema drift for free. TLC added a `cbd_congestion_fee` column starting with 2025 data, tied to NYC's congestion pricing toll that took effect January 5, 2025.
-- Note: TLC publishes with a ~2-month lag, so full-year 2025 data should be complete. Verify that TLC published the final month or months before you finalize the load.
+**Years included:** 2024, 2025 and 2026, contiguous. TLC publishes with a ~2-month lag: on 2026-11-22 the latest published month was 2026-09. Load the rest of 2026 as TLC publishes it. The range covers both schema-drift boundaries: `cbd_congestion_fee` from 2025-01 and `request_source` from 2026-06.
 
-**Why not smaller / why not larger:**
-- Floor: below ~5M rows, Postgres query planner doesn't meaningfully punish a missing index — the EXPLAIN ANALYZE / query optimization work has no teeth.
-- Ceiling: full 2009–2024 archive (~2B+ trips) is unnecessary for local Postgres iteration speed and isn't what this project is trying to prove. Partitioning strategy is *designed* as if scaling to full history, but not physically loaded.
-- At roughly 110–150M rows, the full range needs tens of GB in local Postgres. `raw.trips` alone took about 1.3 GB for 7.5M rows. It is large enough that a bad query plan becomes visible and demonstrable. For fast dbt and Airflow iteration, develop against a few loaded months. A full `fact_trips` refresh of two months took about 1.5 minutes.
+**Volume** (exact row counts from the TLC Parquet file footers, checked 2026-11-22):
+
+| Year | Trips | Per month |
+|---|---|---|
+| 2024 | 41.2M | 2.96–3.83M |
+| 2025 | 48.7M | 3.48–4.59M |
+| 2026, Jan–Sep | 33.6M | 3.34–4.09M |
+| **Published total** | **123.5M** | |
+
+The 33 published files total 2.1 GB of Parquet. If Oct–Dec 2026 match Oct–Dec 2025, the full range is about 136M trips.
+
+**Storage** (measured on 7.5M loaded rows, indexes included):
+- `raw.trips` takes about 340 bytes per row and `fact_trips` about 370 (`stg_trips` is a view).
+- The 123.5M published trips need about 87 GB for these two tables; the full range needs about 96 GB.
+- `dbt run --full-refresh` of `fact_trips` briefly holds the old and new table side by side.
+- Recommended Docker VM disk: 160 GB. That covers the full range (about 96 GB), a second `fact_trips` copy during a full refresh (about 50 GB), and images plus headroom.
 
 ## 3. Data model
  
@@ -40,7 +48,7 @@ It differs from the standard "taxi pipeline" portfolio project in four ways:
 | `dim_payment_type` | Dimension, static | small lookup, cash/card/no-charge/etc |
 | `dim_vendor` | Dimension, static | trivial but included for completeness |
 | `dim_rate_code` | Dimension, static | TLC RatecodeID values (data dictionary, March 2025) |
-| `dim_date` | Dimension, standard | date, day-of-week, month, year, is_holiday — standard practice, cheap to build. Spine 2022-12-31 → 2030 from vars |
+| `dim_date` | Dimension, standard | date, day-of-week, month, year, is_holiday — standard practice, cheap to build. Spine 2023-12-31 → 2030 from vars |
  
 **Bad-data handling decision:** staging **flags** invalid or anomalous trips and does not delete them. Each rule below sets one boolean flag, and `is_valid_trip` combines them. Rationale: deleting at ingest destroys the ability to audit which rows the pipeline excluded and why. Downstream marts filter on the flag instead.
 
@@ -49,8 +57,8 @@ It differs from the standard "taxi pipeline" portfolio project in four ways:
 - trip_distance = 0 AND fare_amount > minimum flag-drop fare → invalid (dbt var `min_flag_drop_fare`, default 3.00)
 - dropoff_datetime <= pickup_datetime → invalid
 - trip duration > 24h → invalid
-- pickup or dropoff `location_id` not in the zone lookup, or = 264 (the lookup's "Unknown" placeholder) → invalid. Coordinate-based bounding-box checks are N/A for this scope — 2023+ TLC data uses `location_id` (zone-based), not lat/long.
-- pickup date outside the file's `source_month`, with a one-day tolerance either side for trips crossing a month boundary → invalid. TLC files carry stray rows, some years off (2001 and 2008 pickups in the 2023-03 and 2026-05 files). This is a DQ problem in its own right. The `dim_date` FK test filters on the flag as a consequence, not the other way round.
+- pickup or dropoff `location_id` not in the zone lookup, or = 264 (the lookup's "Unknown" placeholder) → invalid. Coordinate-based bounding-box checks are N/A for this scope — TLC data in this range uses `location_id` (zone-based), not lat/long.
+- pickup date outside the file's `source_month`, with a one-day tolerance either side for trips crossing a month boundary → invalid. TLC files carry stray rows, some years off (a 2008 and a 2009 pickup in the 2026-05 file). This is a DQ problem in its own right. The `dim_date` FK test filters on the flag as a consequence, not the other way round.
 - `is_outside_nyc` (zone 265, "Outside of NYC") is informational and not part of `is_valid_trip`: trips to Newark or Westchester are real trips.
 ## 4. Pipeline architecture
  
@@ -120,10 +128,10 @@ Two version notes worth tracking rather than assuming:
 ### S3 key convention
  
 ```
-s3://nyc-taxi-datapipeline/raw/yellow/year=2023/month=01/yellow_tripdata_2023-01.parquet
+s3://nyc-taxi-datapipeline/raw/yellow/year=2024/month=01/yellow_tripdata_2024-01.parquet
 ```
  
-Hive-style `key=value` partitioning, zero-padded month. We chose it over the plain `/2023/01/` form because Glue crawlers and Athena auto-detect it as partitions.
+Hive-style `key=value` partitioning, zero-padded month. We chose it over the plain `/2024/01/` form because Glue crawlers and Athena auto-detect it as partitions.
 ### DAG split
  
 Two DAGs, not one:
@@ -188,7 +196,7 @@ nyc-taxi-pipeline/
 │       │   ├── payment_types.csv
 │       │   ├── vendors.csv
 │       │   ├── rate_codes.csv
-│       │   ├── us_holidays.csv          # 2023–2030 federal holidays (scripts/generate_us_holidays.py)
+│       │   ├── us_holidays.csv          # 2024–2030 federal holidays (scripts/generate_us_holidays.py)
 │       │   └── schema.yml               # seed provenance + key tests
 │       ├── snapshots/
 │       │   └── taxi_zone_lookup_snapshot.sql  # audit trail of the committed lookup seed; nothing joins to it

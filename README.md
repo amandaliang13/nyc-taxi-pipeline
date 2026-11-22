@@ -1,6 +1,6 @@
 # NYC Taxi Pipeline
 
-Batch ELT pipeline for NYC TLC yellow taxi trips (2023–2025). It shows idempotent ingestion, schema drift handling, SCD Type 2 and explicit data quality rules.
+Batch ELT pipeline for NYC TLC yellow taxi trips (2024–2026). It shows idempotent ingestion, schema drift handling, SCD Type 2 and explicit data quality rules.
 
 - **Python (`ingestion/`)** moves data: TLC Parquet → S3 → Postgres `raw`, unmodified.
 - **dbt (`dbt/nyc_taxi/`)** transforms it: `raw` → `staging` → `marts` (star schema).
