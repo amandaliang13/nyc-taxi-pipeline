@@ -100,8 +100,8 @@ TLC (Parquet, monthly)
 **Trigger mechanism: asset-based scheduling, not `TriggerDagRunOperator`.** DAG 1 declares `outlets=[Asset("raw_trips_loaded")]`. DAG 2 sets `schedule=[asset]`. The asset gives an explicit, UI-visible data-lineage edge between the two DAGs instead of an imperative trigger call. The asset lives in `dags/assets.py`. DAG 1 already declares it. DAG 2 doesn't use it yet (see Project status above).
 
 **Idempotency is two-layered, both keyed on `source_month` ("YYYY-MM")**:
-- `raw.trips`: `load_month()` does `DELETE WHERE source_month = %s` + `COPY` in one transaction (`ingestion/load_raw.py`) — a rerun never duplicates rows.
-- `control.manifest`: the audit/idempotency table (`sql/control/manifest.sql`), with PK `(taxi_type, source_month)`. `mark_loaded()` upserts it (not inserts), so a rerun updates the existing row. A row means the month is loaded. There is no status column. `mark_loaded()` runs only after `load_month()` commits, so a dbt build that sees the new `loaded_at` also sees the new rows.
+- `raw.trips`: `load_month()` does `DELETE WHERE source_month = %s` + `COPY` (`ingestion/load_raw.py`) — a rerun never duplicates rows. `load_month()` does not commit. The caller owns the transaction.
+- `control.manifest`: the audit/idempotency table (`sql/control/manifest.sql`), with PK `(taxi_type, source_month)`. `mark_loaded()` upserts it (not inserts), so a rerun updates the existing row. A row means the month is loaded. There is no status column. `load_raw_postgres` runs `load_month()` and `mark_loaded()` in one `engine.begin()` transaction. The new rows and the new `loaded_at` commit together, so a dbt build sees both or neither. A failure in either function rolls back both. `loaded_at` comes from `statement_timestamp()` (the upsert time), not `now()` (the transaction start time).
 
 Out-of-order backfills (loading month N+2 before N) must not corrupt state. Test this explicitly in `tests/test_idempotency.py`. Do not only assert it.
 

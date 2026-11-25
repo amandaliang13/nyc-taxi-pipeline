@@ -67,7 +67,7 @@ def _normalize_batch(batch: pa.RecordBatch, source_month: str, start_row: int) -
 def load_month(
         s3_key: str,
         source_month: str,
-        engine,
+        conn,
         *,
         bucket: str,
         schema: str = "raw",
@@ -76,13 +76,15 @@ def load_month(
 ) -> int:
     """Load one month of raw TLC Parquet from S3 into ``raw.trips``; return the row count.
 
-    Rows are COPYed in batches inside a single transaction, so a failure part way
-    through rolls back the DELETE as well.
+    Runs the DELETE and the batched COPYs on ``conn`` and does not commit. The caller
+    owns the transaction, so a failure part way through also rolls back the DELETE
+    (DAG 1 commits it together with the manifest upsert).
 
     Args:
         s3_key: key of the raw Parquet object (e.g. from ``extract.stream_tlc_to_s3``).
         source_month: partition tag, ``"YYYY-MM"``.
-        engine: SQLAlchemy engine for the warehouse, on the psycopg (3) driver.
+        conn: SQLAlchemy connection on the psycopg (3) driver, with a transaction
+            open (e.g. from ``engine.begin()``). COPY runs on its psycopg cursor.
         bucket: S3 bucket holding ``s3_key``.
         schema, table: destination raw table.
         s3_client: optional boto3 S3 client (defaults to ``boto3.client("s3")``).
@@ -95,26 +97,18 @@ def load_month(
     delete_stmt = sql.SQL("DELETE FROM {} WHERE source_month = %s").format(qualified)
 
     row_count = 0
-    raw_conn = engine.raw_connection()
-    try:
-        with raw_conn.cursor() as cur:
-            cur.execute(delete_stmt, (source_month,))
-            for batch in parquet.iter_batches(batch_size=_BATCH_ROWS):
-                batch_table = _normalize_batch(batch, source_month, row_count + 1)
-                copy_stmt = sql.SQL("COPY {} ({}) FROM STDIN WITH (FORMAT CSV)").format(
-                    qualified,
-                    sql.SQL(", ").join(sql.Identifier(c) for c in batch_table.column_names),
-                )
-                buf = io.BytesIO()
-                pacsv.write_csv(batch_table, buf, pacsv.WriteOptions(include_header=False))
-                with cur.copy(copy_stmt) as copy:
-                    copy.write(buf.getbuffer())
-                row_count += batch_table.num_rows
-        raw_conn.commit()
-    except Exception:
-        raw_conn.rollback()
-        raise
-    finally:
-        raw_conn.close()
+    with conn.connection.cursor() as cursor:
+        cursor.execute(delete_stmt, (source_month,))
+        for batch in parquet.iter_batches(batch_size=_BATCH_ROWS):
+            batch_table = _normalize_batch(batch, source_month, row_count + 1)
+            copy_stmt = sql.SQL("COPY {} ({}) FROM STDIN WITH (FORMAT CSV)").format(
+                qualified,
+                sql.SQL(", ").join(sql.Identifier(c) for c in batch_table.column_names),
+            )
+            buf = io.BytesIO()
+            pacsv.write_csv(batch_table, buf, pacsv.WriteOptions(include_header=False))
+            with cursor.copy(copy_stmt) as copy:
+                copy.write(buf.getbuffer())
+            row_count += batch_table.num_rows
 
     return row_count
