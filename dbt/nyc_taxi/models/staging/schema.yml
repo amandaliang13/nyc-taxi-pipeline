@@ -15,8 +15,9 @@ sources:
     tables:
       - name: manifest
         description: >
-          One row per loaded (taxi_type, source_month), upserted by mark_loaded() only
-          after raw.trips has committed. fact_trips rebuilds a month when its loaded_at
+          One row per loaded (taxi_type, source_month), upserted by mark_loaded() in the
+          same transaction as the raw.trips load, so the new rows and the new loaded_at
+          become visible together. fact_trips rebuilds a month when its loaded_at
           differs from the one the fact was built from.
         data_tests:
           # fact_trips joins on (source_month, taxi_type = 'yellow'); a second row per

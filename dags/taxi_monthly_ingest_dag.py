@@ -22,8 +22,8 @@ Design notes:
 
 - Idempotent:
     * S3 key is deterministic          -> a re-put overwrites.
-    * raw load is delete-by-source_month + insert in one transaction
-                                       -> a re-run never duplicates rows.
+    * raw load (delete-by-source_month + insert) and the manifest upsert
+      commit in one transaction        -> a re-run never duplicates rows.
 """
 
 from __future__ import annotations
@@ -133,13 +133,14 @@ def taxi_monthly_ingest():
     def load_raw_postgres(month: dict[str, str], s3_key: str) -> dict[str, object]:
         """Load one month into raw.trips, then record it in the manifest.
 
-        - delete-by-source_month + COPY insert, single transaction (idempotent).
+        - delete-by-source_month + COPY insert and the manifest upsert, in one
+          engine.begin() transaction (idempotent; a failure rolls back both).
         - normalized-on-load: snake_case columns, nullable superset schema,
           minimal coercion.
         - manifest upsert drives backfill visibility and "which months need dbt".
-          Ordering invariant: mark_loaded runs only after load_month has committed
-          raw.trips, so any dbt build that sees the new loaded_at also sees the new
-          rows (fact_trips rebuilds a month when loaded_at moves).
+          Atomicity invariant: raw.trips and control.manifest commit together, so a
+          dbt build sees either the old rows and old loaded_at, or the new rows and
+          new loaded_at (fact_trips rebuilds a month when loaded_at moves).
         - on success, emits a RAW_TRIPS_LOADED asset event (schedules DAG 2).
 
         Returns {"source_month": ..., "row_count": ...}.
@@ -151,19 +152,21 @@ def taxi_monthly_ingest():
         from ingestion.manifest import mark_loaded
 
         engine = PostgresHook(postgres_conn_id=WAREHOUSE_CONN_ID).get_sqlalchemy_engine()
-        row_count = load_month(
-            s3_key=s3_key,
-            source_month=month["source_month"],
-            engine=engine,
-            bucket=Variable.get("S3_BUCKET"),
-            s3_client=S3Hook(aws_conn_id=AWS_CONN_ID).get_conn(),
-        )
-        mark_loaded(
-            source_month=month["source_month"],
-            row_count=row_count,
-            s3_key=s3_key,
-            engine=engine,
-        )
+
+        with engine.begin() as conn:
+            row_count = load_month(
+                s3_key=s3_key,
+                source_month=month["source_month"],
+                conn=conn,
+                bucket=Variable.get("S3_BUCKET"),
+                s3_client=S3Hook(aws_conn_id=AWS_CONN_ID).get_conn(),
+            )
+            mark_loaded(
+                source_month=month["source_month"],
+                row_count=row_count,
+                s3_key=s3_key,
+                conn=conn,
+            )
         return {"source_month": month["source_month"], "row_count": row_count}
 
     month = resolve_month()
