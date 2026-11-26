@@ -30,6 +30,9 @@ dev = [
 # ingestion/ isn't an installed package; put the repo root on sys.path.
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "dbt: runs dbt against the throwaway test database (skips without `uv run dbt deps`)",
+]
 
 [tool.ruff.lint]
 extend-select = ["TID251"]

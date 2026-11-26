@@ -1,8 +1,11 @@
-"""Shared fixtures: a throwaway warehouse database, mocked S3, and synthetic TLC Parquet.
+"""Shared fixtures: a throwaway warehouse database, mocked S3, synthetic TLC Parquet, dbt.
 
 The test database is created on the warehouse Postgres from .env (localhost:5432),
 built from sql/ DDL, and dropped at session end -- the real warehouse is never
 touched. Tests that need it skip cleanly when Postgres isn't reachable.
+
+run_dbt runs dbt in-process against that database through the committed profile's
+`test` target, which has no fallback to the warehouse (see dbt/nyc_taxi/profiles.yml).
 """
 
 import io
@@ -15,12 +18,15 @@ import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from dbt.cli.main import dbtRunner, dbtRunnerResult
 from dotenv import find_dotenv, load_dotenv
 from moto import mock_aws
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError
 
+from ingestion import manifest
+from ingestion.load_raw import load_month
 from ingestion.tlc import s3_raw_key
 
 load_dotenv(find_dotenv())
@@ -32,6 +38,12 @@ DDL_FILES = (
 )
 TEST_BUCKET = "test-raw"
 TAXI_TYPE = "yellow"
+
+DBT_PROJECT_DIR = REPO_ROOT / "dbt" / "nyc_taxi"
+# Every schema dbt writes (dbt_project.yml, macros/generate_schema_name.sql).
+DBT_SCHEMAS = ("staging", "marts", "seeds", "snapshots")
+# Comment-only until the presentation mart is built; dbt fails on it.
+DBT_ALWAYS_EXCLUDE = "mart_zone_hourly_demand"
 
 _MONEY_COLUMNS = {
     "fare_amount": 12.10,
@@ -94,6 +106,37 @@ def engine(_test_db_engine):
     with _test_db_engine.begin() as conn:
         conn.execute(text("TRUNCATE raw.trips, control.manifest"))
     return _test_db_engine
+
+
+@pytest.fixture
+def run_dbt(engine, tmp_path, monkeypatch):
+    """Run dbt against the throwaway database, with every dbt schema dropped first.
+
+    Returns ``run(*args)`` -> ``dbtRunnerResult``, e.g. ``run("run", "--select", "x")``.
+    The caller asserts on ``success``. Each call uses the committed profile's ``test``
+    target, this test's own target/log paths, and excludes the unbuilt presentation mart.
+    """
+    if not (DBT_PROJECT_DIR / "dbt_packages").is_dir():
+        pytest.skip("dbt_packages/ missing: run `uv run dbt deps`")
+
+    monkeypatch.setenv("DBT_TEST_DBNAME", engine.url.database)
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP SCHEMA IF EXISTS {', '.join(DBT_SCHEMAS)} CASCADE"))
+
+    runner = dbtRunner()
+    common = [
+        "--project-dir", str(DBT_PROJECT_DIR),
+        "--profiles-dir", str(DBT_PROJECT_DIR),
+        "--target", "test",
+        "--target-path", str(tmp_path / "dbt_target"),
+        "--log-path", str(tmp_path / "dbt_logs"),
+        "--exclude", DBT_ALWAYS_EXCLUDE,
+    ]  # fmt: skip
+
+    def _run(*args: str) -> dbtRunnerResult:
+        return runner.invoke([*args, *common])
+
+    return _run
 
 
 @pytest.fixture
@@ -189,3 +232,30 @@ def put_month(s3):
         return key
 
     return _put
+
+
+@pytest.fixture
+def ingest(engine, s3):
+    """Load one month the way DAG 1's load_raw_postgres task does.
+
+    load_month, then mark_loaded, in one engine.begin() transaction.
+    """
+
+    def _ingest(source_month: str) -> int:
+        year, month = source_month.split("-")
+        key = s3_raw_key(year=year, month=month, taxi_type=TAXI_TYPE)
+        with engine.begin() as conn:
+            row_count = load_month(
+                s3_key=key,
+                source_month=source_month,
+                conn=conn,
+                bucket=TEST_BUCKET,
+                s3_client=s3,
+            )
+            # Look up via the module so tests can monkeypatch manifest.mark_loaded.
+            manifest.mark_loaded(
+                source_month=source_month, row_count=row_count, s3_key=key, conn=conn
+            )
+        return row_count
+
+    return _ingest

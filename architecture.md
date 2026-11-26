@@ -224,8 +224,9 @@ nyc-taxi-pipeline/
 │           └── generate_schema_name.sql # use +schema verbatim (staging, not public_staging)
 │
 ├── tests/
-│   ├── conftest.py                      # throwaway test DB, moto S3, synthetic TLC Parquet
-│   └── test_idempotency.py              # pytest: rerun + out-of-order backfill don't corrupt state (ingestion layer)
+│   ├── conftest.py                      # throwaway test DB, moto S3, synthetic TLC Parquet, run_dbt
+│   ├── test_idempotency.py              # pytest: rerun + out-of-order backfill don't corrupt state (ingestion layer)
+│   └── test_fact_trips_idempotency.py   # pytest + dbt: fact_trips rebuilds only the months that changed
 │
 └── scripts/
     └── backfill.sh                      # backfill.sh START END (YYYY-MM): one DAG 1 trigger per month
@@ -239,7 +240,7 @@ Notes on this layout:
   - We considered replaying history into a snapshot and rejected it. The snapshot breaks for good if the first run happens in the wrong order.
   - The event table is deterministic and safe to full-refresh.
   - The snapshot that remains (`taxi_zone_lookup_snapshot`) records changes to the *committed* lookup seed only. It captures a TLC revision only if someone re-downloads and commits the file.
-- `tests/test_idempotency.py` is a deliberate, separate test target from dbt tests. dbt tests validate data correctness. This file validates pipeline *behavior* (rerun safety, backfill ordering). That is a different claim, and it should be demonstrated, not just asserted in the README.
+- `tests/test_idempotency.py` and `tests/test_fact_trips_idempotency.py` are a deliberate, separate test target from dbt tests. dbt tests validate data correctness. These files validate pipeline *behavior* (rerun safety, backfill ordering), for the ingestion layer and for `fact_trips` respectively. That is a different claim, and it should be demonstrated, not just asserted in the README. The `fact_trips` file runs dbt, but it is still a behavior test, not a dbt test.
 
 **Deltas from the original plan, and why:**
 - **`extract.py` absorbed `load_raw_s3.py`.** The original plan split "pull from TLC" and "write to S3" into two files. We built it as one streaming call instead (`requests.get(..., stream=True)` piped straight into `s3.upload_fileobj`). The ~500MB monthly file is never buffered in memory or written to local disk between the two steps. We moved URL and S3-key addressing into a separate `tlc.py`. Both `extract.py` and `load_raw.py` depend on it. That is the independent-testability seam now, instead of the extract/S3-write split.

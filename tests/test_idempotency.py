@@ -2,6 +2,8 @@
 Validates pipeline *behavior*, Ingestion layer only:
   - re-running an already-loaded month does not duplicate rows
   - out-of-order backfills (month N+2 before month N) do not corrupt state
+
+dbt's fact_trips side lives in test_fact_trips_idempotency.py.
 """
 
 import psycopg.errors
@@ -10,36 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from ingestion import load_raw, manifest
-from ingestion.load_raw import load_month
-from ingestion.tlc import s3_raw_key
-from tests.conftest import TAXI_TYPE, TEST_BUCKET, make_tlc_table
-
-
-@pytest.fixture
-def ingest(engine, s3):
-    """Load one month the way DAG 1's load_raw_postgres task does.
-
-    load_month, then mark_loaded, in one engine.begin() transaction.
-    """
-
-    def _ingest(source_month: str) -> int:
-        year, month = source_month.split("-")
-        key = s3_raw_key(year=year, month=month, taxi_type=TAXI_TYPE)
-        with engine.begin() as conn:
-            row_count = load_month(
-                s3_key=key,
-                source_month=source_month,
-                conn=conn,
-                bucket=TEST_BUCKET,
-                s3_client=s3,
-            )
-            # Look up via the module so tests can monkeypatch manifest.mark_loaded.
-            manifest.mark_loaded(
-                source_month=source_month, row_count=row_count, s3_key=key, conn=conn
-            )
-        return row_count
-
-    return _ingest
+from tests.conftest import make_tlc_table
 
 
 def _month_counts(engine) -> dict[str, int]:
@@ -167,6 +140,7 @@ def test_failure_mid_copy_rolls_back_delete(engine, put_month, ingest, monkeypat
 
     assert _row_ids(engine, "2023-06") == ids_before
     assert _manifest(engine) == manifest_before
+
 
 def test_failure_mark_loaded_rolls_back_trips(engine, put_month, ingest, monkeypatch):
     put_month("2023-06", rows=3)

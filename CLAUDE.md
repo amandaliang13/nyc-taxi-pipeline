@@ -9,7 +9,7 @@ Never commit or push without explicit approval, even when the work feels done.
 ## Project status
 
 **Built: ingestion, dbt staging and dbt marts. Not built yet: the presentation mart and DAG 2.** The project layout and architecture decisions are final (see `architecture.md`). Built:
-- Ingestion layer (`ingestion/`, DAG 1 tasks, `sql/` DDL). `tests/test_idempotency.py` covers rerun, out-of-order backfill, rollback, schema drift and stable `source_row_number`. These tests cover the ingestion layer only. The dbt/`fact_trips` half comes in Phase 6.
+- Ingestion layer (`ingestion/`, DAG 1 tasks, `sql/` DDL). `tests/test_idempotency.py` covers rerun, out-of-order backfill, rollback, schema drift and stable `source_row_number`, for the ingestion layer only. `tests/test_fact_trips_idempotency.py` (marker `dbt`) covers the `fact_trips` half: out-of-order backfill, a month reload, `loaded_at` moving back, and `fact_rebuild_from`. The rest of the Phase 6 suite isn't built yet.
 - `scripts/backfill.sh` and DAG 1's side of the trigger: `load_raw_postgres` declares `outlets=[RAW_TRIPS_LOADED]` (`dags/assets.py`).
 - dbt foundation: schema routing, seeds, `dbt_utils`, and the staging models (`stg_trips` with per-rule DQ flags + `is_valid_trip`).
 - dbt marts: `fact_trips` (incremental by `source_month`), `dim_zones` (SCD2 on Congestion Relief Zone (CRZ) membership), `dim_date`, `dim_payment_type`, `dim_vendor` and `dim_rate_code`.
@@ -37,7 +37,7 @@ uv run ruff check .                        # lint
 uv run ruff format .                       # format
 ```
 
-`tests/test_idempotency.py` needs the warehouse Postgres to run (`docker compose up -d warehouse-db`). The tests create and drop a throwaway `nyc_taxi_test_*` database, so they never touch the real warehouse. `moto` mocks S3. If Postgres isn't reachable, the tests **skip** instead of failing. Check the `-rs` output before you trust a green run.
+`tests/test_idempotency.py` and `tests/test_fact_trips_idempotency.py` need the warehouse Postgres to run (`docker compose up -d warehouse-db`). The tests create and drop a throwaway `nyc_taxi_test_*` database, so they never touch the real warehouse. `moto` mocks S3. If Postgres isn't reachable, the tests **skip** instead of failing. The `fact_trips` tests (whole file marked `dbt`) also skip when `dbt/nyc_taxi/dbt_packages/` is missing (run `uv run dbt deps`). Check the `-rs` output before you trust a green run. They run dbt in-process through the committed profile's `test` target. Its `dbname` comes from `DBT_TEST_DBNAME`, which the `run_dbt` fixture sets and which has no default, so dbt can't fall back to the real warehouse. Never put `DBT_TEST_DBNAME` in `.env`. Run only the dbt tests with `uv run pytest -m dbt`.
 
 Local stack (Airflow 3.x + two Postgres instances + Redis, via `compose.yaml`):
 
